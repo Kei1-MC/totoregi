@@ -6,7 +6,12 @@
  */
 use fmRESTor\fmRESTor;
 session_start();
-if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
+$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+        && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+if (!isset($_SESSION['store_id'])) {
+    if ($is_ajax) { header('Content-Type: application/json'); http_response_code(401); echo json_encode(['ok'=>false,'error'=>'セッションが切れました。画面を再読み込みしてログインし直してください。']); exit(); }
+    header('Location: login.php'); exit();
+}
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 require_once __DIR__ . '/bumon_master.php';
@@ -76,9 +81,6 @@ $nebiki_ritsu_master = [10, 20, 30, 50];
 $nebiki_gaku_master  = [50, 100, 200, 300];
 
 $error_message = '';
-
-$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-        && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // ---- POST: レシート全体削除 ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_ajax) {
