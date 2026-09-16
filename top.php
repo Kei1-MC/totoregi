@@ -3,6 +3,7 @@
  * top.php  店舗ダッシュボード
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }

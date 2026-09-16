@@ -5,6 +5,7 @@
  */
 use fmRESTor\fmRESTor;
 
+require_once __DIR__ . '/session_config.php';
 session_start();
 
 if (isset($_SESSION['store_id'])) {

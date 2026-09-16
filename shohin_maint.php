@@ -5,6 +5,7 @@
  * ※ 店舗による新規商品登録・削除は行わない（本部管理）
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }

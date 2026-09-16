@@ -3,6 +3,7 @@
  * File: hq_header.php
  * ととレジ 本社用共通ヘッダー
  */
+require_once __DIR__ . '/session_config.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();

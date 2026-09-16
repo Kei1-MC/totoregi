@@ -5,6 +5,7 @@
  * - 数量・値引きの変更、行削除、新商品追加
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
         && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';

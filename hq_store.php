@@ -4,6 +4,7 @@
  * 選択店舗の月次成績：日別売上・客数・部門別合計・昨対
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();

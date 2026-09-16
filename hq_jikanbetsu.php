@@ -4,6 +4,7 @@
  * 日別に 12時/15時/17時/閉店後 の客数・売上累計を全店合計で表示
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();

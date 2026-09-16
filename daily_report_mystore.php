@@ -4,6 +4,7 @@
  * 当月の日別売上一覧 ＋ 昨対比（前年同日 / 前年同週同曜日）切り替え
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }

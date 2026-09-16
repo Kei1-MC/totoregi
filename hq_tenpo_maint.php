@@ -4,6 +4,7 @@
  * 機能: 店舗一覧・営業状態管理・インストアコード設定
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();

@@ -2,6 +2,7 @@
 /**
  * hq_top.php  本社ダッシュボード
  */
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
