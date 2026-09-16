@@ -8,8 +8,16 @@
  */
 use fmRESTor\fmRESTor;
 session_start();
-if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
-if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
+$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+        && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+if (!isset($_SESSION['store_id'])) {
+    if ($is_ajax) { header('Content-Type: application/json'); http_response_code(401); echo json_encode(['ok'=>false,'error'=>'セッションが切れました。画面を再読み込みしてログインし直してください。']); exit(); }
+    header('Location: login.php'); exit();
+}
+if (($_SESSION['role'] ?? '') === 'hq') {
+    if ($is_ajax) { header('Content-Type: application/json'); http_response_code(403); echo json_encode(['ok'=>false,'error'=>'本部アカウントでは登録できません。']); exit(); }
+    header('Location: hq_top.php'); exit();
+}
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 require_once __DIR__ . '/instore_codes.php';
@@ -82,8 +90,6 @@ $nebiki_ritsu_master = [10, 20, 30, 50];
 $nebiki_gaku_master  = [50, 100, 200, 300];
 
 $error_message = '';
-$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-        && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // AJAX の場合は JSON body を読む
