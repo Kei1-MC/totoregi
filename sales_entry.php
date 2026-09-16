@@ -554,6 +554,34 @@ body { overflow: hidden; margin: 0; padding: 0; }
 }
 .toast-err.show { opacity: 1; }
 
+/* === セッション期限 事前警告バナー === */
+.session-warn-banner {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: #ff8f00;
+    color: #fff;
+    padding: 0.6em 1em;
+    font-size: 0.95em;
+    font-weight: bold;
+    text-align: center;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    gap: 1em;
+    flex-wrap: wrap;
+}
+.session-warn-banner.show { display: flex; }
+.session-warn-banner button {
+    background: #fff;
+    color: #ff8f00;
+    border: none;
+    border-radius: 0.4em;
+    padding: 0.3em 0.9em;
+    font-weight: bold;
+    cursor: pointer;
+}
+
 /* ===================== レシートオーバーレイ ===================== */
 .receipt-overlay {
     display: none;
@@ -845,6 +873,12 @@ body { overflow: hidden; margin: 0; padding: 0; }
 <div class="toast-ok" id="toast-ok"></div>
 <div class="toast-err" id="toast-err"></div>
 
+<!-- セッション期限 事前警告バナー -->
+<div class="session-warn-banner" id="session-warn-banner">
+  ⏱ まもなく自動的にログアウトします。続けて使う場合は再読み込みしてください。
+  <button type="button" id="session-warn-reload">今すぐ再読み込み</button>
+</div>
+
 <!-- レシートオーバーレイ -->
 <div class="receipt-overlay" id="receipt-overlay">
   <div class="receipt-inner" id="receipt-inner"></div>
@@ -927,6 +961,26 @@ const elRegBtn       = $('reg-btn');
 const elClearCartBtn = $('clear-cart-btn');
 const elToastOk      = $('toast-ok');
 const elToastErr     = $('toast-err');
+const elSessionWarn  = $('session-warn-banner');
+
+/* ===================== セッション期限 事前警告 =====================
+ * session_config.php のセッション有効期限（120分）に合わせて、
+ * 期限切れの少し前に「再読み込みしてください」の警告を表示する。
+ * 登録が成功する（＝サーバ側のセッションが延長される）たびにタイマーを
+ * リセットするので、営業中ずっと使い続けていれば警告は出ない。
+ */
+const SESSION_LIFETIME_SEC     = 7200; // session_config.php と合わせる
+const SESSION_WARN_BEFORE_SEC  = 600;  // 期限の10分前に警告
+let sessionWarnTimer = null;
+function armSessionWarnTimer() {
+    if (sessionWarnTimer) clearTimeout(sessionWarnTimer);
+    elSessionWarn.classList.remove('show');
+    sessionWarnTimer = setTimeout(() => {
+        elSessionWarn.classList.add('show');
+    }, (SESSION_LIFETIME_SEC - SESSION_WARN_BEFORE_SEC) * 1000);
+}
+$('session-warn-reload').addEventListener('click', () => location.reload());
+armSessionWarnTimer();
 
 /* ===================== カテゴリータブ ===================== */
 $('bumon-area').addEventListener('click', function(e) {
@@ -1097,6 +1151,7 @@ elRegBtn.addEventListener('click', async function() {
         const data = await res.json();
 
         if (data.ok) {
+            armSessionWarnTimer();
             showReceipt(cart, data.receipt_no, data.total, data.count);
             cart = [];
             renderCart();
