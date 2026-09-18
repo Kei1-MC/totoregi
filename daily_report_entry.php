@@ -324,6 +324,18 @@ if (($qrTeikyu['result']['messages'][0]['code'] ?? '0') !== '401') {
     }
 }
 
+// ---- 実績のある部門（自店の取扱部門設定が未選択でも、日報保存済みの値や
+//      レジの実績がある部門は非表示にしない） ----
+$busho_has_data = [];
+foreach (array_keys($all_busho) as $bf) {
+    $has = ((int)($fd[$bf] ?? 0) > 0)
+        || ((int)($fd[bushoTimeField($bf, '12時')] ?? 0) > 0)
+        || ((int)($fd[bushoTimeField($bf, '15時')] ?? 0) > 0)
+        || ((int)($fd[bushoTimeField($bf, '17時')] ?? 0) > 0)
+        || (($tr_all['by_field'][$bf] ?? 0) > 0);
+    if ($has) $busho_has_data[] = $bf;
+}
+
 // ---- ヘルパー ----
 function _int(string $key): int { return (int)($_POST[$key] ?? 0); }
 
@@ -1075,6 +1087,9 @@ include __DIR__ . '/header.php';
 const STORE_ID  = '<?= htmlspecialchars($store_id) ?>';
 const BUMON_KEY = 'dr_bumon_' + STORE_ID;
 const DR_DATE   = <?= json_encode($target_date_fm) ?>;
+// 取扱部門の設定（チェックボックス）に関わらず、実績（保存済みの値・レジ実績）が
+// ある部門は常に表示する
+const BUSHO_HAS_DATA = <?= json_encode($busho_has_data, JSON_UNESCAPED_UNICODE) ?>;
 
 // ---- レジの実績を反映 ----
 // ボタンを押した時点で毎回サーバーに最新の pos_records を問い合わせて集計するため、
@@ -1105,11 +1120,16 @@ async function reflectRegi(suffix, btn) {
                 if (input && !input.disabled) {
                     const v = data.busho[bf] || 0;
                     input.value = v > 0 ? v : '';
+                    // 反映した部門は、ページ読込後に初めて実績が付いた場合でも
+                    // 以後すべてのセクションで表示する
+                    if (v > 0 && !BUSHO_HAS_DATA.includes(bf)) BUSHO_HAS_DATA.push(bf);
                 }
             });
         }
         const kyakuInput = document.getElementById('kyaku-input-' + suffix);
         if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = data.kyaku || '';
+        const saved = localStorage.getItem(BUMON_KEY);
+        applyBumonSetting(saved ? JSON.parse(saved) : []);
         calcGoukeiFor('busho-input-' + suffix, 'busho-goukei-' + suffix);
     } catch (err) {
         alert('通信エラー: ' + err.message);
@@ -1168,23 +1188,26 @@ BUSHO_TOTAL_TARGETS.forEach(([inputClass, totalElId]) => {
 // ---- 部門設定 localStorage ----
 function loadBumonSetting() {
     const saved = localStorage.getItem(BUMON_KEY);
-    if (!saved) {
-        // 初回：アコーディオンを自動オープン
+    const active = saved ? JSON.parse(saved) : [];
+    if (!saved && BUSHO_HAS_DATA.length === 0) {
+        // 初回かつ実績もまだ無い：アコーディオンを自動オープン
         document.getElementById('accord-head').classList.add('open');
         document.getElementById('accord-body').classList.add('open');
-        return;
     }
-    const active = JSON.parse(saved);
     applyBumonSetting(active);
-    // チェックボックスにも反映
+    // チェックボックスは「保存済み設定」∪「実績がある部門」を反映
+    const effective = new Set([...active, ...BUSHO_HAS_DATA]);
     document.querySelectorAll('.bumon-cb').forEach(cb => {
-        cb.checked = active.includes(cb.value);
+        cb.checked = effective.has(cb.value);
     });
 }
 
 function applyBumonSetting(activeFields) {
+    // チェックした部門に加えて、実績（保存済みの値・レジ実績）がある部門は
+    // 未選択でも常に表示する（手動設定漏れによる集計ミスを防ぐため）
+    const effective = new Set([...activeFields, ...BUSHO_HAS_DATA]);
     document.querySelectorAll('.busho-cmp').forEach(row => {
-        row.classList.toggle('active', activeFields.includes(row.dataset.field));
+        row.classList.toggle('active', effective.has(row.dataset.field));
     });
     // calcGoukeiFor() は初期化時に呼ばない。
     // FM合計売上（サーバーレンダリング値）を保持するため、
