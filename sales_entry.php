@@ -964,12 +964,12 @@ const elToastErr     = $('toast-err');
 const elSessionWarn  = $('session-warn-banner');
 
 /* ===================== セッション期限 事前警告 =====================
- * session_config.php のセッション有効期限（120分）に合わせて、
+ * session_config.php のセッション有効期限（60分）に合わせて、
  * 期限切れの少し前に「再読み込みしてください」の警告を表示する。
  * 登録が成功する（＝サーバ側のセッションが延長される）たびにタイマーを
  * リセットするので、営業中ずっと使い続けていれば警告は出ない。
  */
-const SESSION_LIFETIME_SEC     = 7200; // session_config.php と合わせる
+const SESSION_LIFETIME_SEC     = 3600; // session_config.php と合わせる
 const SESSION_WARN_BEFORE_SEC  = 600;  // 期限の10分前に警告
 let sessionWarnTimer = null;
 function armSessionWarnTimer() {
