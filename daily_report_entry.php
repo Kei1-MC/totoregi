@@ -8,7 +8,16 @@
 use fmRESTor\fmRESTor;
 require_once __DIR__ . '/session_config.php';
 session_start();
-if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
+$is_reflect_ajax = (($_GET['ajax'] ?? '') === 'reflect_regi');
+if (!isset($_SESSION['user'])) {
+    if ($is_reflect_ajax) {
+        header('Content-Type: application/json');
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'error' => 'session_expired']);
+        exit();
+    }
+    header('Location: login.php'); exit();
+}
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 
 require_once __DIR__ . '/src/fmRESTor.php';
@@ -80,9 +89,9 @@ $all_busho = [
 
 // ---- 時間帯別 部門売上フィールド（12時/15時/17時。閉店後と同じ部門構成） ----
 $time_slots = [
-    '12' => ['label' => '🕛 12時', 'action' => 'save_12', 'fm_suffix' => '12時', 'field_kyaku' => '客数_12時'],
-    '15' => ['label' => '🕒 15時', 'action' => 'save_15', 'fm_suffix' => '15時', 'field_kyaku' => '客数_15時'],
-    '17' => ['label' => '🕔 17時', 'action' => 'save_17', 'fm_suffix' => '17時', 'field_kyaku' => '客数_17時'],
+    '12' => ['label' => '🕛 12時', 'action' => 'save_12', 'fm_suffix' => '12時', 'field_kyaku' => '客数_12時', 'cutoff' => '12:00:00'],
+    '15' => ['label' => '🕒 15時', 'action' => 'save_15', 'fm_suffix' => '15時', 'field_kyaku' => '客数_15時', 'cutoff' => '15:00:00'],
+    '17' => ['label' => '🕔 17時', 'action' => 'save_17', 'fm_suffix' => '17時', 'field_kyaku' => '客数_17時', 'cutoff' => '17:00:00'],
 ];
 function bushoTimeField(string $bushoField, string $fmSuffix): string {
     return $bushoField . '_' . $fmSuffix;
@@ -140,10 +149,25 @@ $pos_records = (($qrPos['result']['messages'][0]['code'] ?? '0') !== '401')
     ? ($qrPos['result']['response']['data'] ?? [])
     : [];
 
-$tr_12  = totoregiAgg($pos_records, '12:00:00');
-$tr_15  = totoregiAgg($pos_records, '15:00:00');
-$tr_17  = totoregiAgg($pos_records, '17:00:00');
-$tr_all = totoregiAgg($pos_records, null);
+$tr_12  = totoregiAgg($pos_records, $time_slots['12']['cutoff'], $all_busho);
+$tr_15  = totoregiAgg($pos_records, $time_slots['15']['cutoff'], $all_busho);
+$tr_17  = totoregiAgg($pos_records, $time_slots['17']['cutoff'], $all_busho);
+$tr_all = totoregiAgg($pos_records, null, $all_busho);
+
+// ---- AJAX: 「レジの実績を反映」ボタン用。ページ読み込み時点のキャッシュではなく、
+//      クリックの都度ここで最新の pos_records を再集計して返す（反映ボタンを押す
+//      タイミングが多少前後しても、常にその時点の最新実績が返る） ----
+if ($is_reflect_ajax) {
+    header('Content-Type: application/json');
+    $slot_key = $_GET['slot'] ?? '';
+    if (!isset($time_slots[$slot_key])) {
+        echo json_encode(['ok' => false, 'error' => 'invalid_slot']);
+        exit();
+    }
+    $agg = totoregiAgg($pos_records, $time_slots[$slot_key]['cutoff'], $all_busho);
+    echo json_encode(['ok' => true, 'kyaku' => $agg['count'], 'busho' => $agg['by_field']]);
+    exit();
+}
 
 // ---- POST 処理 ----
 $success_msg = '';
@@ -316,10 +340,15 @@ function py(array $py_fd, string $key): string {
  * pos_API 明細を「作成情報タイムスタンプ」で時刻カットオフ集計する。
  * $cutoff_hm = 'HH:MM:SS' 形式。null なら全日（カットオフなし）。
  * 客数はレシート番号（伝票単位）の distinct 件数、累計売上は販売金額の合計。
+ * $all_busho を渡すと、部門別（売上日報のフィールドキー単位）の内訳も by_field で返す
+ * （「レジの実績を反映」ボタン用。pos_API の「部門」はレジ側の表示カテゴリー名で
+ * 記録されており、売上日報の部門ラベルと同じ文字列であることを前提にしている）。
  */
-function totoregiAgg(array $pos_records, ?string $cutoff_hm): array {
+function totoregiAgg(array $pos_records, ?string $cutoff_hm, array $all_busho = []): array {
+    $label_to_field = array_flip($all_busho);
     $receipts = [];
     $sum = 0;
+    $by_field = array_fill_keys(array_keys($all_busho), 0);
     foreach ($pos_records as $row) {
         $f  = $row['fieldData'];
         $ts = $f['作成情報タイムスタンプ'] ?? '';
@@ -329,9 +358,14 @@ function totoregiAgg(array $pos_records, ?string $cutoff_hm): array {
         }
         $rno = trim((string)($f['レシート番号'] ?? ''));
         if ($rno !== '') $receipts[$rno] = true;
-        $sum += (int)($f['販売金額'] ?? 0);
+        $kingaku = (int)($f['販売金額'] ?? 0);
+        $sum += $kingaku;
+        $label = trim((string)($f['部門'] ?? ''));
+        if (isset($label_to_field[$label])) {
+            $by_field[$label_to_field[$label]] += $kingaku;
+        }
     }
-    return ['count' => count($receipts), 'sum' => $sum];
+    return ['count' => count($receipts), 'sum' => $sum, 'by_field' => $by_field];
 }
 function trCount(array $tr): string {
     return $tr['count'] > 0 ? '<span class="tr-val">' . number_format($tr['count']) . '</span>件' : '<span class="tr-none">―</span>';
@@ -511,6 +545,19 @@ include __DIR__ . '/header.php';
 .save-btn.kakutei { background: #b71c1c; margin-top: 0.35em; }
 .save-btn.kakutei:hover { background: #c62828; }
 .save-btn:disabled { background: #ccc; cursor: default; }
+
+/* レジ実績 反映ボタン */
+.reflect-btn {
+    display: block; width: 100%;
+    padding: 0.6em;
+    margin-top: 0.6em;
+    background: #fff; color: #1565c0;
+    border: 1px solid #1565c0; border-radius: 0.5em;
+    font-size: 0.9em; font-weight: bold;
+    cursor: pointer; transition: background .15s;
+}
+.reflect-btn:hover { background: #e3f2fd; }
+.reflect-btn:disabled { background: #eee; color: #999; border-color: #ccc; cursor: default; }
 
 /* アコーディオン（部門設定） */
 .accord-wrap { margin-bottom: 0.6em; }
@@ -863,7 +910,7 @@ include __DIR__ . '/header.php';
       }
 
       $done = (int)($fd[$field_kyaku] ?? 0) > 0 || $uriage_total > 0;
-      echo '<div class="dr-section">';
+      echo '<div class="dr-section" id="dr-section-' . $suffix . '">';
       echo '<div class="dr-section-head">' . $label;
       if ($done) echo ' <span class="done-mark">✓ 入力済</span>';
       echo '</div>';
@@ -876,7 +923,7 @@ include __DIR__ . '/header.php';
       $pyv_k = (int)($py_fd[$field_kyaku] ?? 0);
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">客　数</span>';
-      echo '<div><input class="cmp-input" type="number" name="' . $field_kyaku . '" inputmode="numeric" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">人</span></div>';
+      echo '<div><input class="cmp-input" id="kyaku-input-' . $suffix . '" type="number" name="' . $field_kyaku . '" inputmode="numeric" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">人</span></div>';
       echo '<div class="cmp-tr">' . trCount($tr) . '</div>';
       echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
@@ -902,7 +949,9 @@ include __DIR__ . '/header.php';
       echo '</div>';
 
       if (!$is_kakutei) {
-          echo '<button type="submit" class="save-btn">💾 ' . preg_replace('/[🕛🕒🕔]\s*/', '', $label) . ' を保存</button>';
+          $plain_label = preg_replace('/[🕛🕒🕔]\s*/', '', $label);
+          echo '<button type="button" class="reflect-btn" onclick="reflectRegi(\'' . $suffix . '\', this)">🧾 レジの実績を反映</button>';
+          echo '<button type="submit" class="save-btn">💾 ' . $plain_label . ' を保存</button>';
       }
       echo '</form>';
       echo '</div></div>';
@@ -1025,6 +1074,50 @@ include __DIR__ . '/header.php';
 <script>
 const STORE_ID  = '<?= htmlspecialchars($store_id) ?>';
 const BUMON_KEY = 'dr_bumon_' + STORE_ID;
+const DR_DATE   = <?= json_encode($target_date_fm) ?>;
+
+// ---- レジの実績を反映 ----
+// ボタンを押した時点で毎回サーバーに最新の pos_records を問い合わせて集計するため、
+// ページを開いてからしばらく経っていたり、押すタイミングが12/15/17時ちょうどから
+// 多少前後していても、その時点までの実績が正しく反映される。
+async function reflectRegi(suffix, btn) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '取得中…';
+    try {
+        const url = '?date=' + encodeURIComponent(DR_DATE) +
+                    '&ajax=reflect_regi&slot=' + encodeURIComponent(suffix);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.ok) {
+            if (data.error === 'session_expired') {
+                alert('セッションが切れています。ページを再読み込みしてログインし直してください。');
+            } else {
+                alert('レジ実績の取得に失敗しました。');
+            }
+            return;
+        }
+        const sec = document.getElementById('dr-section-' + suffix);
+        if (sec) {
+            sec.querySelectorAll('.busho-cmp').forEach(row => {
+                const bf = row.dataset.field;
+                const input = row.querySelector('.busho-input-' + suffix);
+                if (input && !input.disabled) {
+                    const v = data.busho[bf] || 0;
+                    input.value = v > 0 ? v : '';
+                }
+            });
+        }
+        const kyakuInput = document.getElementById('kyaku-input-' + suffix);
+        if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = data.kyaku || '';
+        calcGoukeiFor('busho-input-' + suffix, 'busho-goukei-' + suffix);
+    } catch (err) {
+        alert('通信エラー: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
 
 // ---- アコーディオン ----
 function toggleAccord() {
