@@ -7,6 +7,7 @@
  *   3. sales_confirm.php へリダイレクト
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
         && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
@@ -20,6 +21,7 @@ if (($_SESSION['role'] ?? '') === 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 require_once __DIR__ . '/instore_codes.php';
 
 $store_id   = $_SESSION['store_id'];
@@ -34,26 +36,24 @@ $today      = date('m/d/Y');
 // フォーマット: 店舗部門コード(7桁) + 金額(5桁) + CD(1桁) = 13桁
 // 7桁コードの例: 魚=2004355, 天ぷら=2004354 など
 // フィールド型: テキスト（バーコード生成で文字列連結するため）
+//
+// 部門定義は bumon_API（部門マスタ）から取得する（bumon_master.php）
 // =====================================================================
+
+// 部門マスタ（並び順昇順）
+$bumon_master   = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
+$category_order = bumon_names($bumon_master);
 
 /** FM account_API からインストアコード7桁を取得 */
 function _fetch_instore_codes_from_fm(string $store_id, string $host, string $db,
                                        string $layout_account,
-                                       string $api_master_user, string $api_master_pass): array {
-    // 部門名 → FM フィールド名 の対応
-    $dept_fields = [
-        '魚'     => 'インストアコード_魚',
-        '天ぷら' => 'インストアコード_天ぷら',
-        '惣菜'   => 'インストアコード_惣菜',
-        'イカ焼' => 'インストアコード_イカ焼',
-        '唐揚'   => 'インストアコード_唐揚',
-        'レジ袋' => 'インストアコード_レジ袋',
-    ];
+                                       string $api_master_user, string $api_master_pass,
+                                       array $dept_fields): array {
     try {
         $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
                                       $api_master_user, $api_master_pass,
                                       ['allowInsecure' => true]);
-        $res = $fm->findRecord([['店舗Ｎｏ' => $store_id]]);
+        $res = $fm->findRecords(['query' => [['店舗Ｎｏ' => $store_id]]]);
         $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
         $codes = [];
         foreach ($dept_fields as $cat => $field) {
@@ -68,7 +68,8 @@ function _fetch_instore_codes_from_fm(string $store_id, string $host, string $db
 
 // FM から取得（フィールド未設定店舗は空配列が返る）
 $ic_dept_fm = _fetch_instore_codes_from_fm(
-    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass,
+    bumon_ic_field_map($bumon_master)
 );
 
 // フォールバック: instore_codes.php の静的設定（FM 移行完了後は削除可）
@@ -190,8 +191,7 @@ $category_map = [
     '南蛮漬'  => '惣菜',
     '唐揚'    => '唐揚',
 ];
-// 表示順（この順番でタブを並べる）
-$category_order = ['魚', '天ぷら', '惣菜', 'イカ焼', '唐揚'];
+// 表示順は bumon_master.php で取得済みの $category_order（bumon_API 並び順）を使用
 
 $fm2  = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
 // 全件取得 → PHP で自店舗・発売中 を絞り込む（shohin_maint.php と同方式）
@@ -216,9 +216,12 @@ foreach ($res2['result']['response']['data'] ?? [] as $row) {
     // 部門名をカテゴリーにマッピング
     $cat = $category_map[$b] ?? $b;
 
-    // 店舗のセール価格（未設定=0の場合は本体価格を使用）
+    // 本体価格：店舗別に設定されていればそれを使用、なければ本部設定の本体価格
+    $store_honbai = getStoreHonbaiPrice($f, $store_id);
+    $base_price   = ($store_honbai > 0) ? $store_honbai : (int)($f['本体価格'] ?? 0);
+    // セール価格が設定されていればさらに優先
     $sale_price = getStoreSalePrice($f, $store_id);
-    $disp_price = ($sale_price > 0) ? $sale_price : (int)($f['本体価格'] ?? 0);
+    $disp_price = ($sale_price > 0) ? $sale_price : $base_price;
 
     $products[] = [
         'bumon'      => $cat,
@@ -270,7 +273,8 @@ body { overflow: hidden; margin: 0; padding: 0; }
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr auto;  /* タブ → 商品 → カート */
-    height: calc(100dvh - 48px);        /* dvh: ブラウザナビバーを考慮した実際の高さ */
+    height: calc(100vh - 48px);         /* フォールバック: dvh未対応の古いWebView/Chrome向け */
+    height: calc(100dvh - 48px);        /* dvh: ブラウザナビバーを考慮した実際の高さ（対応ブラウザで上書き）2026/08/06 */
     overflow: hidden;
     margin-top: 0 !important;
 }
@@ -480,6 +484,9 @@ body { overflow: hidden; margin: 0; padding: 0; }
     border: 1.5px solid #e53935;
     white-space: nowrap;
     transition: all .1s;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .clear-cart-btn:hover { background: #e53935; color: #fff; }
 /* カートフッター */
@@ -505,6 +512,9 @@ body { overflow: hidden; margin: 0; padding: 0; }
     cursor: pointer;
     white-space: nowrap;
     transition: background .15s;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .register-btn:hover { background: #00695c; }
 .register-btn:disabled { background: #bbb; cursor: not-allowed; }
@@ -543,6 +553,34 @@ body { overflow: hidden; margin: 0; padding: 0; }
     pointer-events: none;
 }
 .toast-err.show { opacity: 1; }
+
+/* === セッション期限 事前警告バナー === */
+.session-warn-banner {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: #ff8f00;
+    color: #fff;
+    padding: 0.6em 1em;
+    font-size: 0.95em;
+    font-weight: bold;
+    text-align: center;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    gap: 1em;
+    flex-wrap: wrap;
+}
+.session-warn-banner.show { display: flex; }
+.session-warn-banner button {
+    background: #fff;
+    color: #ff8f00;
+    border: none;
+    border-radius: 0.4em;
+    padding: 0.3em 0.9em;
+    font-weight: bold;
+    cursor: pointer;
+}
 
 /* ===================== レシートオーバーレイ ===================== */
 .receipt-overlay {
@@ -679,12 +717,6 @@ body { overflow: hidden; margin: 0; padding: 0; }
     font-weight: bold; cursor: pointer;
 }
 .rcpt-btn-print:hover { background: #0d47a1; }
-.rcpt-btn-next {
-    flex: 1; background: #004d40; color: #fff; border: none;
-    border-radius: 0.5em; padding: 0.7em; font-size: 1em;
-    font-weight: bold; cursor: pointer;
-}
-.rcpt-btn-next:hover { background: #00695c; }
 
 /* ===================== タブレット向け最適化（768px以上） ===================== */
 /* スマホでは使用しない想定。縦1列・カート下固定レイアウトを維持しつつ拡大。 */
@@ -774,6 +806,37 @@ body { overflow: hidden; margin: 0; padding: 0; }
 /* カートパネルヘッダーは非表示（縦1列レイアウトでは不要） */
 .cart-panel-header { display: none; }
 
+/* ===================== 横向きタブレット：左に商品・右にカート（全高） ===================== */
+@media (orientation: landscape) {
+    .pos-wrap {
+        grid-template-columns: 1.7fr 1fr;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+            "tabs   cart"
+            "shohin cart";
+    }
+    .pos-bumon  { grid-area: tabs; }
+    .pos-shohin { grid-area: shohin; }
+    .pos-cart {
+        grid-area: cart;
+        height: 100%;
+        max-height: none;
+        border-top: none;
+        border-left: 2px solid #004d40;
+        box-shadow: -2px 0 8px rgba(0,0,0,.1);
+    }
+    .cart-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6em 0.8em;
+        background: #004d40;
+        color: #fff;
+        font-weight: bold;
+        font-size: 0.95em;
+    }
+}
+
 /* ===================== 印刷用 CSS ===================== */
 @media print {
     /* POS画面・ナビ・フッター非表示 */
@@ -809,6 +872,12 @@ body { overflow: hidden; margin: 0; padding: 0; }
 <!-- トースト -->
 <div class="toast-ok" id="toast-ok"></div>
 <div class="toast-err" id="toast-err"></div>
+
+<!-- セッション期限 事前警告バナー -->
+<div class="session-warn-banner" id="session-warn-banner">
+  ⏱ まもなく自動的にログアウトします。続けて使う場合は再読み込みしてください。
+  <button type="button" id="session-warn-reload">今すぐ再読み込み</button>
+</div>
 
 <!-- レシートオーバーレイ -->
 <div class="receipt-overlay" id="receipt-overlay">
@@ -892,6 +961,26 @@ const elRegBtn       = $('reg-btn');
 const elClearCartBtn = $('clear-cart-btn');
 const elToastOk      = $('toast-ok');
 const elToastErr     = $('toast-err');
+const elSessionWarn  = $('session-warn-banner');
+
+/* ===================== セッション期限 事前警告 =====================
+ * session_config.php のセッション有効期限（60分）に合わせて、
+ * 期限切れの少し前に「再読み込みしてください」の警告を表示する。
+ * 登録が成功する（＝サーバ側のセッションが延長される）たびにタイマーを
+ * リセットするので、営業中ずっと使い続けていれば警告は出ない。
+ */
+const SESSION_LIFETIME_SEC     = 3600; // session_config.php と合わせる
+const SESSION_WARN_BEFORE_SEC  = 600;  // 期限の10分前に警告
+let sessionWarnTimer = null;
+function armSessionWarnTimer() {
+    if (sessionWarnTimer) clearTimeout(sessionWarnTimer);
+    elSessionWarn.classList.remove('show');
+    sessionWarnTimer = setTimeout(() => {
+        elSessionWarn.classList.add('show');
+    }, (SESSION_LIFETIME_SEC - SESSION_WARN_BEFORE_SEC) * 1000);
+}
+$('session-warn-reload').addEventListener('click', () => location.reload());
+armSessionWarnTimer();
 
 /* ===================== カテゴリータブ ===================== */
 $('bumon-area').addEventListener('click', function(e) {
@@ -1062,6 +1151,7 @@ elRegBtn.addEventListener('click', async function() {
         const data = await res.json();
 
         if (data.ok) {
+            armSessionWarnTimer();
             showReceipt(cart, data.receipt_no, data.total, data.count);
             cart = [];
             renderCart();
@@ -1131,8 +1221,8 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         groups[b].push(it);
     });
 
-    /* 表示順をカテゴリー順に並べ替え */
-    const catOrder = ['魚','天ぷら','惣菜','唐揚'];
+    /* 表示順をカテゴリー順に並べ替え（bumon_API 並び順） */
+    const catOrder = <?= json_encode($category_order, JSON_UNESCAPED_UNICODE) ?>;
     order.sort(function(a,b) {
         var ia = catOrder.indexOf(a); if (ia < 0) ia = 99;
         var ib = catOrder.indexOf(b); if (ib < 0) ib = 99;
@@ -1241,7 +1331,6 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     /* ボタン */
     html += '<div class="rcpt-buttons">';
     html += '<button class="rcpt-btn-print" id="rcpt-print-btn">🖨 印刷</button>';
-    html += '<button class="rcpt-btn-next" id="rcpt-close">次のお客様へ →</button>';
     html += '</div>';
 
     inner.innerHTML = html;
@@ -1264,13 +1353,9 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         } catch(e) { console.warn('Barcode error for ' + bumon + ':', e); }
     });
 
-    /* 印刷ボタン */
+    /* 印刷ボタン（印刷実行後、レシートを閉じて売上登録画面に戻る＝次のお客様の入力へ） */
     document.getElementById('rcpt-print-btn').addEventListener('click', function() {
         starPrintReceipt(this);
-    });
-
-    /* 閉じるボタン */
-    document.getElementById('rcpt-close').addEventListener('click', function() {
         overlay.classList.remove('show');
     });
 }

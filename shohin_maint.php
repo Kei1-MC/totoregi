@@ -5,16 +5,19 @@
  * ※ 店舗による新規商品登録・削除は行わない（本部管理）
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
 
-$bumon_master = ['魚', '天ぷら', '冷惣菜', 'いか焼', '唐揚', 'レジ袋'];
+// 部門定義（bumon_API から取得。並び順昇順）
+$bumon_master = bumon_names(fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass));
 
 /* =====================================================================
    AJAX ハンドラー（POST）— getRecord を使わず、ポジションは呼び出し元が渡す
@@ -46,6 +49,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $key = repeatKey('セール価格', $my_pos);
         $res = $fm->editRecord($rid, ['fieldData' => [$key => $sale_price ?: '']]);
+        $code = $res['result']['messages'][0]['code'] ?? '500';
+        echo json_encode(['ok' => ($code === '0')]);
+        exit();
+    }
+
+    /* ── 本体価格（店舗別）保存（my_pos はページ側から受け取る）── */
+    if ($action === 'save_honbai_price') {
+        $honbai_price = max(0, (int)($_POST['honbai_price'] ?? 0));
+        $my_pos       = (int)($_POST['my_pos'] ?? 0);
+        if ($my_pos < 1 || $my_pos > MAX_STORE_REPS || $honbai_price <= 0) {
+            echo json_encode(['ok' => false, 'error' => 'invalid_pos_or_price']);
+            exit();
+        }
+        $key = repeatKey('店舗本体価格', $my_pos);
+        $res = $fm->editRecord($rid, ['fieldData' => [$key => $honbai_price]]);
         $code = $res['result']['messages'][0]['code'] ?? '500';
         echo json_encode(['ok' => ($code === '0')]);
         exit();
@@ -127,9 +145,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['ok' => false, 'error' => 'invalid_pos', 'debug' => $dbg]);
             exit();
         }
-        $key = repeatKey('取扱店舗', $next_pos);
+        // 本部設定の本体価格を取得し、店舗本体価格の初期値にする（クライアント値は信用しない）
+        $rec_res = $fm->getRecord($rid);
+        $master_price = (int)($rec_res['result']['response']['data'][0]['fieldData']['本体価格'] ?? 0);
+
+        $key      = repeatKey('取扱店舗', $next_pos);
+        $price_key = repeatKey('店舗本体価格', $next_pos);
         $dbg['key'] = $key;
-        $res  = $fm->editRecord($rid, ['fieldData' => [$key => $store_id]]);
+        $dbg['master_price'] = $master_price;
+        $res  = $fm->editRecord($rid, ['fieldData' => [
+            $key       => $store_id,
+            $price_key => $master_price,
+        ]]);
         $code = $res['result']['messages'][0]['code'] ?? '500';
         $dbg['fm_code']     = $code;
         $dbg['fm_messages'] = $res['result']['messages'] ?? [];
@@ -145,8 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         }
         $res = $fm->editRecord($rid, ['fieldData' => [
-            repeatKey('取扱店舗',  $my_pos) => '',
+            repeatKey('取扱店舗',   $my_pos) => '',
             repeatKey('セール価格', $my_pos) => '',
+            repeatKey('店舗本体価格', $my_pos) => '',
         ]]);
         $code = $res['result']['messages'][0]['code'] ?? '500';
         echo json_encode(['ok' => ($code === '0')]);
@@ -176,18 +204,22 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
 
     if ($my_pos !== false) {
         /* ── 自店舗商品 ── */
-        $sale_price = (int)($f[repeatKey('セール価格', $my_pos)] ?? 0);
+        $sale_price   = (int)($f[repeatKey('セール価格', $my_pos)] ?? 0);
+        $master_price = (int)($f['本体価格'] ?? 0);
+        // 店舗本体価格が未設定（移行前・データ不整合時）は本部設定価格にフォールバック
+        $honbai_price = (int)($f[repeatKey('店舗本体価格', $my_pos)] ?? 0) ?: $master_price;
         $products[] = [
-            'record_id'  => $row['recordId'],
-            'name'       => $n,
-            'bumon'      => trim($f['部門']     ?? ''),
-            'yomi'       => trim($f['よみがな'] ?? ''),
-            'price'      => (int)($f['本体価格'] ?? 0),
-            'tani'       => trim($f['販売単位'] ?? ''),
-            'hanbai_chu' => (int)($f['発売中']  ?? 1),
-            'sale'       => (int)($f['セール']  ?? 0),
-            'sale_price' => $sale_price,
-            'my_pos'     => $my_pos, // セール価格保存・外す処理に使用
+            'record_id'    => $row['recordId'],
+            'name'         => $n,
+            'bumon'        => trim($f['部門']     ?? ''),
+            'yomi'         => trim($f['よみがな'] ?? ''),
+            'master_price' => $master_price, // 本部設定価格（参考表示用）
+            'price'        => $honbai_price, // 店舗本体価格（編集可能）
+            'tani'         => trim($f['販売単位'] ?? ''),
+            'hanbai_chu'   => (int)($f['発売中']  ?? 1),
+            'sale'         => (int)($f['セール']  ?? 0),
+            'sale_price'   => $sale_price,
+            'my_pos'       => $my_pos, // 価格保存・外す処理に使用
         ];
     } else {
         /* ── マスター（未取扱）── */
@@ -283,13 +315,14 @@ include __DIR__ . '/header.php';
 /* セール価格 */
 .sale-price-wrap { display: flex; align-items: center; gap: 0.3em; flex-shrink: 0; }
 .sale-price-wrap label { font-size: 0.72em; color: #888; white-space: nowrap; }
-.sale-price-input {
+.sale-price-input, .honbai-price-input {
     width: 5.5em; border: 1.5px solid #c8d8c8; border-radius: 0.35em;
     padding: 0.2em 0.4em; font-size: 0.88em; text-align: right;
     color: #c62828; font-weight: bold;
 }
-.sale-price-input:focus { border-color: #004d40; outline: none; }
-.sale-price-input.saved { border-color: #00897b; }
+.honbai-price-input { color: #004d40; }
+.sale-price-input:focus, .honbai-price-input:focus { border-color: #004d40; outline: none; }
+.sale-price-input.saved, .honbai-price-input.saved { border-color: #00897b; }
 
 /* 外すボタン */
 .btn-remove-row {
@@ -371,8 +404,18 @@ include __DIR__ . '/header.php';
             <?php if ($p['tani']): ?><span class="product-tani"><?= htmlspecialchars($p['tani']) ?></span><?php endif; ?>
           </div>
 
-          <!-- 定価 -->
-          <div class="product-price">¥<?= number_format($p['price']) ?></div>
+          <!-- 本部設定価格（参考） -->
+          <div class="product-price" title="本部設定価格">定価¥<?= number_format($p['master_price']) ?></div>
+
+          <!-- 本体価格（店舗別・編集可能） -->
+          <div class="sale-price-wrap">
+            <label>本体価格</label>
+            <input type="number" class="honbai-price-input"
+                   data-rid="<?= $p['record_id'] ?>"
+                   data-my-pos="<?= $p['my_pos'] ?>"
+                   value="<?= $p['price'] ?>"
+                   min="1" max="99999">
+          </div>
 
           <!-- セール価格 -->
           <div class="sale-price-wrap">
@@ -472,6 +515,40 @@ function saveSalePrice() {
             setTimeout(function() { inp.classList.remove('saved'); }, 1500);
         } else {
             alert('セール価格の保存に失敗しました。');
+        }
+    });
+}
+
+/* ── 本体価格（店舗別）自動保存（フォーカスアウト / Enter）── */
+document.querySelectorAll('.honbai-price-input').forEach(function(inp) {
+    inp.dataset.lastValid = inp.value;
+    inp.addEventListener('blur', saveHonbaiPrice);
+    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') this.blur(); });
+});
+function saveHonbaiPrice() {
+    var inp   = this;
+    var rid   = inp.dataset.rid;
+    var myPos = inp.dataset.myPos;
+    var val   = parseInt(inp.value) || 0;
+    if (val <= 0) {
+        alert('本体価格は1円以上を入力してください。');
+        inp.value = inp.dataset.lastValid;
+        return;
+    }
+    fetch('shohin_maint.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=save_honbai_price&record_id=' + encodeURIComponent(rid)
+            + '&my_pos=' + encodeURIComponent(myPos)
+            + '&honbai_price=' + val
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            inp.dataset.lastValid = String(val);
+            inp.classList.add('saved');
+            setTimeout(function() { inp.classList.remove('saved'); }, 1500);
+        } else {
+            alert('本体価格の保存に失敗しました。');
+            inp.value = inp.dataset.lastValid;
         }
     });
 }

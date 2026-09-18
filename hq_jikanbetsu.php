@@ -4,6 +4,7 @@
  * 日別に 12時/15時/17時/閉店後 の客数・売上累計を全店合計で表示
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
@@ -36,6 +37,27 @@ $days_in_month = (int)date('t', mktime(0,0,0,$sel_month,1,$sel_year));
 // 曜日ラベル
 $week_ja  = ['Sun'=>'日','Mon'=>'月','Tue'=>'火','Wed'=>'水','Thu'=>'木','Fri'=>'金','Sat'=>'土'];
 
+// ---- 部門一覧（12時/15時/17時の部門別売上フィールド算出用。閉店後と同一） ----
+$all_busho = [
+    '売上_天ぷら', '売上_魚', '売上_唐揚', '売上_冷惣菜', '売上_催事', '売上_イカ焼',
+    '売上_エキタカ', '売上_くじら', '売上_コンビニデリカ', '売上_セルフ唐揚',
+    '売上_セルフ天丼', '売上_セルフ惣菜', '売上_フライ', '売上_串揚', '売上_丼',
+    '売上_個食', '売上_弁当', '売上_弁当Ⅱ', '売上_生串揚', '売上_鯛',
+];
+
+/**
+ * 時間帯の累計売上を算出する。
+ * 部門別入力への移行前（旧・単一フィールド）／移行後（新・部門別フィールド合計）の
+ * どちらか一方にしか値が入らないため、両方を単純に加算すれば月をまたいでも集計が途切れない。
+ */
+function jikanbetsuUriage(array $f, string $legacyField, string $fmSuffix, array $all_busho): int {
+    $v = (int)($f[$legacyField] ?? 0);
+    foreach ($all_busho as $bf) {
+        $v += (int)($f[$bf . '_' . $fmSuffix] ?? 0);
+    }
+    return $v;
+}
+
 // ---- FM 取得 ----
 $first_fm = sprintf('%02d/01/%04d', $sel_month, $sel_year);
 $last_fm  = sprintf('%02d/%02d/%04d', $sel_month, $days_in_month, $sel_year);
@@ -67,6 +89,7 @@ for ($d = 1; $d <= $days_in_month; $d++) {
         'kareisan'     => 0,
         'kareihaki'    => 0,
         'stores'       => 0,
+        'confirmed'    => 0,
     ];
 }
 
@@ -79,16 +102,17 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         if ($day < 1 || $day > $days_in_month) continue;
 
         $daily[$day]['kyaku_12']     += (int)($f['客数_12時']         ?? 0);
-        $daily[$day]['uriage_12']    += (int)($f['売上累計_12時']     ?? 0);
+        $daily[$day]['uriage_12']    += jikanbetsuUriage($f, '売上累計_12時', '12時', $all_busho);
         $daily[$day]['kyaku_15']     += (int)($f['客数_15時']         ?? 0);
-        $daily[$day]['uriage_15']    += (int)($f['売上累計_15時']     ?? 0);
+        $daily[$day]['uriage_15']    += jikanbetsuUriage($f, '売上累計_15時', '15時', $all_busho);
         $daily[$day]['kyaku_17']     += (int)($f['客数_17時']         ?? 0);
-        $daily[$day]['uriage_17']    += (int)($f['売上累計_17時']     ?? 0);
+        $daily[$day]['uriage_17']    += jikanbetsuUriage($f, '売上累計_17時', '17時', $all_busho);
         $daily[$day]['kyaku_heiten'] += (int)($f['客数_閉店後']       ?? 0);
         $daily[$day]['uriage_total'] += (int)($f['合計売上']          ?? 0);
         $daily[$day]['kareisan']     += (int)($f['からすかれい_製造数'] ?? 0);
         $daily[$day]['kareihaki']    += (int)($f['からすかれい_廃棄数'] ?? 0);
         $daily[$day]['stores']++;
+        if (trim($f['入力状態'] ?? '') === '確定') $daily[$day]['confirmed']++;
     }
 }
 
@@ -120,6 +144,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             fputcsv($out, [
                 $sel_month . '/' . $d, $row['dow'],
                 '', '', '', '', '', '', '', '', '', '', ''
+            ]);
+        } elseif ($row['confirmed'] < $row['stores']) {
+            fputcsv($out, [
+                $sel_month . '/' . $d, $row['dow'],
+                '未確定', '未確定', '未確定', '未確定', '未確定', '未確定',
+                '未確定', '未確定', '未確定', '未確定', $row['stores'],
             ]);
         } else {
             fputcsv($out, [
@@ -215,6 +245,7 @@ table.jk-table td.dow-col {
 table.jk-table td.dow-sun { color: #c62828; font-weight: bold; }
 table.jk-table td.dow-sat { color: #1565c0; font-weight: bold; }
 table.jk-table td.empty { color: #bbb; text-align: center; }
+table.jk-table td.mikakunin-cell { color: #e65100; font-weight: bold; text-align: center; }
 
 table.jk-table tbody tr:hover td { background: #f3f4fb; }
 table.jk-table .today-row td { background: #fff9c4 !important; }
@@ -286,13 +317,17 @@ table.jk-table tfoot td.date-col { text-align: center; }
           $dow_class = ($dow === '日') ? 'dow-sun' : (($dow === '土') ? 'dow-sat' : '');
           $is_today = ($d == $today_day);
           $has_data = ($row['stores'] > 0);
+          $is_unconfirmed = ($has_data && $row['confirmed'] < $row['stores']);
         ?>
         <tr class="<?= $is_today ? 'today-row' : '' ?>">
           <td class="date-col">
             <?= $sel_month ?>/<?= $d ?>
           </td>
           <td class="dow-col <?= $dow_class ?>"><?= $dow ?></td>
-          <?php if ($has_data): ?>
+          <?php if ($is_unconfirmed): ?>
+            <td class="mikakunin-cell" colspan="10">未確定</td>
+            <td style="text-align:center;"><?= $row['stores'] ?></td>
+          <?php elseif ($has_data): ?>
             <td><?= number_format($row['kyaku_12']) ?></td>
             <td>¥<?= number_format($row['uriage_12']) ?></td>
             <td><?= number_format($row['kyaku_15']) ?></td>

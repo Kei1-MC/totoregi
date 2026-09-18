@@ -5,23 +5,18 @@
  *       発売中/セールのトグル、取扱店舗チェックボックス（複数選択）、インストアコードプレビュー
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 
-// 部門定義 + インストアコード
-$bumon_master = [
-    '魚'     => '04355',
-    '天ぷら' => '04354',
-    '冷惣菜' => '04357',
-    'いか焼' => '04508',
-    '唐揚'   => '04509',
-    'レジ袋' => '04510',
-];
-$bumon_list = array_keys($bumon_master);
+// 部門定義（bumon_API から取得。並び順昇順）
+$bumon_master = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
+$bumon_list   = bumon_names($bumon_master);
 
 /* =====================================================================
    AJAX ハンドラー（POST）
@@ -69,15 +64,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dbg = ['rid' => $rid, 'selected_stores' => $selectedStoreIds];
         if ($rid) {
             // 編集: ページロード時に渡されたポジション情報を使用（getRecord 不要）
-            $currentPositions  = json_decode($_POST['current_positions']  ?? '{}', true) ?: [];
-            $currentSalePrices = json_decode($_POST['current_sale_prices'] ?? '{}', true) ?: [];
-            $storeData = buildStoreFieldData($selectedStoreIds, $currentPositions, $currentSalePrices);
+            $currentPositions    = json_decode($_POST['current_positions']    ?? '{}', true) ?: [];
+            $currentSalePrices   = json_decode($_POST['current_sale_prices']  ?? '{}', true) ?: [];
+            $currentHonbaiPrices = json_decode($_POST['current_honbai_prices'] ?? '{}', true) ?: [];
+            $storeData = buildStoreFieldData($selectedStoreIds, $currentPositions, $currentSalePrices,
+                                              $currentHonbaiPrices, $fields['本体価格']);
             $dbg['current_positions']  = $currentPositions;
             $dbg['store_data_sample']  = array_slice($storeData, 0, 4, true); // 最初の4フィールドのみ
             $res = $fm->editRecord($rid, ['fieldData' => array_merge($fields, $storeData)]);
         } else {
-            // 新規: 空のポジションマップで構築
-            $storeData = buildStoreFieldData($selectedStoreIds);
+            // 新規: 空のポジションマップで構築（選択店舗には本部設定の本体価格を初期値にする）
+            $storeData = buildStoreFieldData($selectedStoreIds, [], [], [], $fields['本体価格']);
             $dbg['store_data_sample']  = array_slice($storeData, 0, 4, true);
             $res = $fm->createRecord(['fieldData' => array_merge($fields, $storeData)]);
         }
@@ -131,22 +128,24 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
 
     $pos_map     = getStorePositions($f);               // [pos => storeId]
     $sp_map      = getRepeatValues($f, 'セール価格');   // [pos => price]
+    $hp_map      = getRepeatValues($f, '店舗本体価格'); // [pos => 店舗別本体価格]
     $store_ids   = array_values($pos_map);              // ['101', '102', ...]
     $store_names = array_map(fn($id) => $stores[$id] ?? $id, $store_ids);
 
     $products[] = [
-        'record_id'   => $row['recordId'],
-        'name'        => $n,
-        'bumon'       => trim($f['部門']     ?? ''),
-        'yomi'        => trim($f['よみがな'] ?? ''),
-        'price'       => (int)($f['本体価格'] ?? 0),
-        'tani'        => trim($f['販売単位'] ?? ''),
-        'hanbai_chu'  => (int)($f['発売中']  ?? 1),
-        'sale'        => (int)($f['セール']  ?? 0),
-        'store_ids'   => $store_ids,
-        'store_names' => $store_names,
-        'positions'   => $pos_map,   // pos→storeId（保存時に getRecord 不要にするため）
-        'sale_prices' => $sp_map,    // pos→price（セール価格保持のため）
+        'record_id'     => $row['recordId'],
+        'name'          => $n,
+        'bumon'         => trim($f['部門']     ?? ''),
+        'yomi'          => trim($f['よみがな'] ?? ''),
+        'price'         => (int)($f['本体価格'] ?? 0),
+        'tani'          => trim($f['販売単位'] ?? ''),
+        'hanbai_chu'    => (int)($f['発売中']  ?? 1),
+        'sale'          => (int)($f['セール']  ?? 0),
+        'store_ids'     => $store_ids,
+        'store_names'   => $store_names,
+        'positions'     => $pos_map,   // pos→storeId（保存時に getRecord 不要にするため）
+        'sale_prices'   => $sp_map,    // pos→price（セール価格保持のため）
+        'honbai_prices' => $hp_map,    // pos→price（店舗別本体価格保持のため）
     ];
 }
 
@@ -298,14 +297,6 @@ include __DIR__ . '/hq_header.php';
     font-size: 0.9em; color: #333; cursor: pointer; margin-bottom: 0.4em;
 }
 .check-label input[type=checkbox] { width: 1.25em; height: 1.25em; accent-color: #1a237e; cursor: pointer; }
-
-/* ── インストアコードプレビュー ── */
-.instore-preview {
-    background: #f3f4fb; border: 1px solid #c5cae9; border-radius: 0.4em;
-    padding: 0.5em 0.8em; margin-top: 0.5em; font-size: 0.82em;
-}
-.instore-preview .code-val { font-family: monospace; font-size: 1.1em; font-weight: bold; color: #1a237e; letter-spacing: 0.05em; }
-.instore-preview .code-lbl { color: #888; font-size: 0.85em; }
 
 /* ── 取扱店舗チェックボックスグリッド ── */
 .store-check-section {
@@ -523,7 +514,7 @@ include __DIR__ . '/hq_header.php';
         <div class="form-row">
           <div class="form-group">
             <label>部門 <span class="required">*</span></label>
-            <select id="f-bumon" name="bumon" required onchange="updateInstorePreview()">
+            <select id="f-bumon" name="bumon" required>
               <option value="">-- 選択 --</option>
               <?php foreach ($bumon_list as $b): ?>
                 <option value="<?= htmlspecialchars($b, ENT_QUOTES) ?>"><?= htmlspecialchars($b) ?></option>
@@ -546,14 +537,7 @@ include __DIR__ . '/hq_header.php';
         <div class="form-group">
           <label>本体価格（円） <span class="required">*</span></label>
           <input type="number" id="f-price" name="price" placeholder="例: 800"
-                 min="0" max="99999" step="1" required oninput="updateInstorePreview()">
-        </div>
-
-        <!-- インストアコードプレビュー -->
-        <div class="instore-preview" id="instore-preview" style="display:none;">
-          <div class="code-lbl">インストアコード（バーコード）</div>
-          <div class="code-val" id="instore-code-val">―</div>
-          <div class="code-lbl" id="instore-code-info" style="margin-top:0.2em;"></div>
+                 min="0" max="99999" step="1" required>
         </div>
 
         <!-- 発売中 / セール -->
@@ -606,35 +590,6 @@ include __DIR__ . '/hq_header.php';
 </div>
 
 <script>
-/* ================================================================
-   定数
-   ================================================================ */
-var DEPT_CODES = <?= json_encode($bumon_master, JSON_UNESCAPED_UNICODE) ?>;
-
-/* ================================================================
-   インストアコードプレビュー
-   ================================================================ */
-function jan13Check(digits12) {
-    var sum = 0;
-    for (var i = 0; i < 12; i++) {
-        sum += parseInt(digits12[i], 10) * (i % 2 === 0 ? 1 : 3);
-    }
-    return (10 - (sum % 10)) % 10;
-}
-function updateInstorePreview() {
-    var bumon = document.getElementById('f-bumon').value;
-    var price = parseInt(document.getElementById('f-price').value || '0', 10);
-    var prev  = document.getElementById('instore-preview');
-    if (!bumon || !DEPT_CODES[bumon]) { prev.style.display = 'none'; return; }
-    var dept = DEPT_CODES[bumon];
-    var amt  = String(Math.min(price, 99999)).padStart(5, '0');
-    var body = '20' + dept + amt;
-    var cd   = jan13Check(body);
-    document.getElementById('instore-code-val').textContent  = body + cd;
-    document.getElementById('instore-code-info').textContent = '部門コード:' + dept + '  価格:¥' + price.toLocaleString();
-    prev.style.display = '';
-}
-
 /* ================================================================
    発売中トグル
    ================================================================ */
@@ -736,7 +691,6 @@ var _editData = null;
 function openModal(data) {
     _editData = data;
     document.getElementById('product-form').reset();
-    document.getElementById('instore-preview').style.display = 'none';
 
     // まず全チェックを外す
     document.querySelectorAll('.store-cb').forEach(function(cb) { cb.checked = false; });
@@ -758,8 +712,6 @@ function openModal(data) {
         document.querySelectorAll('.store-cb').forEach(function(cb) {
             cb.checked = storeIds.indexOf(cb.value) !== -1;
         });
-
-        updateInstorePreview();
     } else {
         document.getElementById('modal-title').textContent     = '商品を追加';
         document.getElementById('f-record-id').value           = '';
@@ -798,9 +750,10 @@ function saveProduct(e) {
         tani                : document.getElementById('f-tani').value,
         hanbai_chu          : document.getElementById('f-hanbai-chu').checked ? '1' : '0',
         sale                : document.getElementById('f-sale').checked ? '1' : '0',
-        // ページロード時の positions/sale_prices をそのまま返す（getRecord 不要）
-        current_positions   : JSON.stringify(_editData ? (_editData.positions   || {}) : {}),
-        current_sale_prices : JSON.stringify(_editData ? (_editData.sale_prices || {}) : {}),
+        // ページロード時の positions/sale_prices/honbai_prices をそのまま返す（getRecord 不要）
+        current_positions     : JSON.stringify(_editData ? (_editData.positions     || {}) : {}),
+        current_sale_prices   : JSON.stringify(_editData ? (_editData.sale_prices   || {}) : {}),
+        current_honbai_prices : JSON.stringify(_editData ? (_editData.honbai_prices || {}) : {}),
     });
     // 選択された店舗を追加（配列として）
     document.querySelectorAll('.store-cb:checked').forEach(function(cb) {

@@ -39,10 +39,16 @@ bash deploy.sh
 | $layout_hanbai | hanbai_API | 販売商品マスタ |
 | $layout_daily_report | daily_report_API | 売上日報 |
 | $layout_daily_report_sum | daily_report_sum_API | 日報集計 |
+| $layout_haiki | haiki_API | 廃棄日報（商品単位・1日1回入力） |
 
 ## インストアコード仕様
 JAN-13 形式: 店舗部門コード(7桁) + 金額(5桁) + チェックデジット(1桁) = 13桁
 各店舗の部門コードは account_API の インストアコード_* フィールドで管理。
+
+## 単品管理ダッシュボード関連
+- `hanbai_API` に `上代単価`（数値・商品ごと固定値・本部設定）フィールドあり
+- 上代（金額）＝上代単価 × 合計数量（定価数＋値引数＋廃棄数）で都度計算（保存はしない）
+- 廃棄数は `haiki_API`（商品単位・1日1回・店舗スタッフ入力 `haiki_entry.php`）で管理
 
 ## 注意事項
 - FM フィールド名に全角文字あり（例: `店舗Ｎｏ` は全角Ｎ）

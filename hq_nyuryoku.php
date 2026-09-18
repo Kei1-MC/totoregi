@@ -4,6 +4,7 @@
  * Excel「投入確認」シートをWeb再現
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
@@ -56,6 +57,7 @@ $last_fm  = sprintf('%02d/%02d/%04d', $sel_month, $days_in_month, $sel_year);
 $cy_days    = [];   // $cy_days[sno][day] = fieldData
 $sno_name   = [];   // sno => 店舗名
 $unconfirmed = [];  // $unconfirmed[sno][day] = true（入力中だが未確定）
+$teikyu     = [];   // $teikyu[sno][day] = true（定休日として確定）
 
 $r1 = $fm->findRecords([
     'query' => [['売上日' => "{$first_fm}...{$last_fm}"]],
@@ -76,6 +78,9 @@ if (($r1['result']['messages'][0]['code'] ?? '0') !== '401') {
             // 入力状態が「確定」以外は未確定扱い
             if (trim($f['入力状態'] ?? '') !== '確定') {
                 $unconfirmed[$sno][$d] = true;
+            }
+            if ((int)($f['定休日'] ?? 0) === 1) {
+                $teikyu[$sno][$d] = true;
             }
         }
     }
@@ -291,9 +296,12 @@ if (($_GET['export'] ?? '') === 'excel') {
         echo '<td>' . htmlspecialchars($name_disp) . '</td>';
         for ($d = 1; $d <= $days_in_month; $d++) {
             $is_uc = isset($unconfirmed[$sno][$d]);
+            $is_tk = isset($teikyu[$sno][$d]);
             $v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
             if ($is_uc) {
                 echo '<td style="color:#e65100;font-weight:bold;">未確定</td>';
+            } elseif ($is_tk) {
+                echo '<td style="color:#888;font-weight:bold;">定休</td>';
             } else {
                 echo '<td>' . ($v > 0 ? $v : '') . '</td>';
             }
@@ -409,6 +417,7 @@ table.main-tbl th.col-name { z-index: 6; }
 
 /* 未確定・閉店 */
 .mikakunin { color: #e65100; font-size: 0.85em; font-weight: bold; }
+.teikyu-cell { color: #888; font-size: 0.85em; font-weight: bold; }
 .heiten-name { color: #c62828; font-weight: bold; }
 
 /* データ行 - tr に背景を設定してstickyセルが正しくinheritできるようにする */
@@ -540,10 +549,13 @@ table.main-tbl tbody td         { background:inherit; }
         $day_f = $cy_days[$sno][$d] ?? null;
         $v     = (int)(($day_f ?? [])['合計売上'] ?? 0);
         $is_uc = isset($unconfirmed[$sno][$d]);
+        $is_tk = isset($teikyu[$sno][$d]);
       ?>
       <td class="<?= $d===$today_day ? 'today-col-cell' : '' ?>">
         <?php if ($is_uc): ?>
           <span class="mikakunin">未確定</span>
+        <?php elseif ($is_tk): ?>
+          <span class="teikyu-cell">定休</span>
         <?php elseif ($v > 0): ?>
           <?= number_format($v) ?>
         <?php else: ?>

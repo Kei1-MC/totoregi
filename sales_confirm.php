@@ -4,6 +4,7 @@
  * 売上登録確認画面（レシートイメージ）
  * sales_entry.php からセッション経由でデータを受け取る
  */
+require_once __DIR__ . '/session_config.php';
 session_start();
 
 if (!isset($_SESSION['store_id']) || !isset($_SESSION['last_sale'])) {

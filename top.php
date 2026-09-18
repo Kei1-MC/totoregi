@@ -3,6 +3,7 @@
  * top.php  店舗ダッシュボード
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
@@ -271,7 +272,7 @@ include __DIR__ . '/header.php';
   <div class="nav-buttons">
     <a href="sales_entry.php" class="nav-btn primary">
       <span class="nav-icon">＋</span>
-      売上登録
+      レジ
     </a>
     <a href="sales_list.php" class="nav-btn">
       <span class="nav-icon">≡</span>
@@ -280,6 +281,10 @@ include __DIR__ . '/header.php';
     <a href="daily_report_entry.php" class="nav-btn">
       <span class="nav-icon">📋</span>
       売上日報入力
+    </a>
+    <a href="haiki_entry.php" class="nav-btn">
+      <span class="nav-icon">🗑</span>
+      廃棄数入力
     </a>
     <a href="daily_report_mystore.php" class="nav-btn">
       <span class="nav-icon">📈</span>

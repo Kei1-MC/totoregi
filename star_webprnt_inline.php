@@ -10,6 +10,24 @@ function isStarWebPRNTBrowser() {
     return /StarWebPRNT/i.test(navigator.userAgent);
 }
 
+/* 半角=1・全角=2として表示幅を計算（実機テスト印刷で確認した実測値: 半角46文字） */
+var RECEIPT_LINE_WIDTH = 46;
+function _receiptStrWidth(s) {
+    var w = 0;
+    for (var i = 0; i < s.length; i++) {
+        w += (s.charCodeAt(i) > 0xFF) ? 2 : 1;
+    }
+    return w;
+}
+/* 「■ 部門名」を左、「¥部門小計」を右にスペースで詰めて1行にする */
+function _bumonHeaderLine(bumon, bTotal) {
+    var left  = '■ ' + bumon;
+    var right = '\xa5' + bTotal.toLocaleString();
+    var pad   = RECEIPT_LINE_WIDTH - _receiptStrWidth(left) - _receiptStrWidth(right);
+    if (pad < 1) pad = 1;
+    return left + new Array(pad + 1).join(' ') + right;
+}
+
 function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, grandTotal, isKakunin, barCodes, count) {
     var b   = new StarWebPrintBuilder();
     var req = '';
@@ -35,37 +53,26 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
         var code   = barCodes ? (barCodes[bumon] || null) : null;
 
         req += b.createAlignmentElement({ position: 'left' });
-        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '■ ' + bumon + '\n' });
+        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: _bumonHeaderLine(bumon, bTotal) + '\n' });
         req += b.createTextElement({ emphasis: 'false' });
-        req += b.createTextElement({ codepage: 'utf8', data: '商品名  単価  数量  値引額  請求小計\n' });
         req += b.createRuledLineElement({ thickness: 'thin', width: 576 });
 
         bItems.forEach(function(it) {
-            var nebStr = '', nebAmt = 0;
+            var nebStr = '';
             if (it.nebiki_ritsu > 0) {
                 nebStr = ' (-' + it.nebiki_ritsu + '%)';
-                nebAmt = it.nebiki_gaku || Math.round((it.price || 0) * it.nebiki_ritsu / 100);
             } else if (it.nebiki_gaku > 0) {
                 nebStr = ' (-\xa5' + it.nebiki_gaku.toLocaleString() + ')';
-                nebAmt = it.nebiki_gaku;
             }
             req += b.createAlignmentElement({ position: 'left' });
-            req += b.createTextElement({ codepage: 'utf8', data: it.name + nebStr + '  \xd7' + it.qty + '\n' });
+            req += b.createTextElement({ codepage: 'utf8', data: it.name + nebStr + '\n' });
             req += b.createAlignmentElement({ position: 'right' });
             req += b.createTextElement({ codepage: 'utf8', data: '\xa5' + it.subtotal.toLocaleString() + '\n' });
-            var det = '  単価:\xa5' + (it.price || 0).toLocaleString();
-            det += '  値引額:' + (nebAmt > 0 ? '\xa5' + nebAmt.toLocaleString() : '-');
-            req += b.createAlignmentElement({ position: 'left' });
-            req += b.createTextElement({ codepage: 'utf8', data: det + '\n' });
         });
-
-        req += b.createAlignmentElement({ position: 'right' });
-        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: bumon + '小計  \xa5' + bTotal.toLocaleString() + '\n' });
-        req += b.createTextElement({ emphasis: 'false' });
 
         if (code) {
             req += b.createAlignmentElement({ position: 'center' });
-            try { req += b.createBarcodeElement({ symbology: 'JAN13', width: 'width2', hri: 'true', height: 60, data: code }); } catch(e) {}
+            try { req += b.createBarcodeElement({ symbology: 'JAN13', width: 'width3', hri: 'true', height: 60, data: code }); } catch(e) {}
             req += b.createFeedElement({ line: 1 });
         }
         req += b.createRuledLineElement({ thickness: 'medium', width: 576 });

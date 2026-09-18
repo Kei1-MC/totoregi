@@ -4,15 +4,26 @@
  * 機能: 店舗一覧・営業状態管理・インストアコード設定
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 
 $fm = new fmRESTor($host, $db, $layout_account,
                    $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+
+// 部門コードのカラム定義（bumon_API から取得。並び順昇順）
+// key は部門CD由来（部門名は日本語のため HTML id / JS 変数名には使えない）
+$bumon_master = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
+$ic_cols = array_map(fn($b) => [
+    'key'   => 'ic_' . $b['cd'],
+    'label' => $b['name'],
+    'field' => 'インストアコード_' . $b['name'],
+], $bumon_master);
 
 /* =====================================================================
    AJAX ハンドラー（POST）
@@ -28,15 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save' && $rid > 0) {
         $heiten_bi = trim($_POST['heiten_bi'] ?? '');
 
-        $fields = [
-            '営業状態'                => trim($_POST['eigyo_status'] ?? ''),
-            'インストアコード_魚'      => trim($_POST['ic_sakana']   ?? ''),
-            'インストアコード_天ぷら'  => trim($_POST['ic_tempura']  ?? ''),
-            'インストアコード_惣菜'    => trim($_POST['ic_sozai']    ?? ''),
-            'インストアコード_イカ焼'  => trim($_POST['ic_ikayaki']  ?? ''),
-            'インストアコード_唐揚'    => trim($_POST['ic_karaage']  ?? ''),
-            'インストアコード_レジ袋'  => trim($_POST['ic_reji']     ?? ''),
-        ];
+        $fields = ['営業状態' => trim($_POST['eigyo_status'] ?? '')];
+        foreach ($ic_cols as $c) {
+            $fields[$c['field']] = trim($_POST[$c['key']] ?? '');
+        }
         // 閉店日（空の場合は空文字のままFMに渡す）
         $fields['閉店日'] = $heiten_bi;
 
@@ -60,16 +66,6 @@ $raw     = $result['result']['response']['data'] ?? [];
 usort($raw, function($a, $b) {
     return (int)($a['fieldData']['店舗Ｎｏ'] ?? 0) - (int)($b['fieldData']['店舗Ｎｏ'] ?? 0);
 });
-
-// 部門コードのカラム定義
-$ic_cols = [
-    ['key' => 'ic_sakana',   'label' => '魚',     'field' => 'インストアコード_魚'],
-    ['key' => 'ic_tempura',  'label' => '天ぷら', 'field' => 'インストアコード_天ぷら'],
-    ['key' => 'ic_sozai',    'label' => '惣菜',   'field' => 'インストアコード_惣菜'],
-    ['key' => 'ic_ikayaki',  'label' => 'イカ焼', 'field' => 'インストアコード_イカ焼'],
-    ['key' => 'ic_karaage',  'label' => '唐揚',   'field' => 'インストアコード_唐揚'],
-    ['key' => 'ic_reji',     'label' => 'レジ袋', 'field' => 'インストアコード_レジ袋'],
-];
 
 include __DIR__ . '/hq_header.php';
 ?>

@@ -2,6 +2,7 @@
 /**
  * hq_top.php  本社ダッシュボード
  */
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
@@ -107,6 +108,10 @@ include __DIR__ . '/hq_header.php';
     <a href="hq_store.php" class="nav-btn">
       <span class="nav-icon">🏪</span>
       店舗別集計
+    </a>
+    <a href="hq_tanpin.php" class="nav-btn">
+      <span class="nav-icon">🔍</span>
+      単品管理
     </a>
   </div>
 

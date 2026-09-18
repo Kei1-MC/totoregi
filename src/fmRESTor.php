@@ -1378,6 +1378,12 @@ class fmRESTor
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
         }
 
+        /* --- Additional trusted CA bundle (root CAs not yet in the OS store) --- */
+        $caBundle = __DIR__ . "/certs/fm_ca_bundle.pem";
+        if (is_file($caBundle)) {
+            curl_setopt($ch, CURLOPT_CAINFO, $caBundle);
+        }
+
         /* --- Return the transfer as a string --- */
         curl_setopt($ch, CURLOPT_FRESH_CONNECT, TRUE);
 

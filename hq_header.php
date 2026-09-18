@@ -3,6 +3,7 @@
  * File: hq_header.php
  * ととレジ 本社用共通ヘッダー
  */
+require_once __DIR__ . '/session_config.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
     header('Location: login.php'); exit();
@@ -61,6 +62,9 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
                 </li>
                 <li class="nav-item">
                     <a class="nav-link py-1" href="hq_store.php">🏪 店舗別集計</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="hq_tanpin.php">🔍 単品管理</a>
                 </li>
                 <li class="nav-item border-top border-secondary mt-1 pt-1">
                     <span class="nav-link py-1 text-white-50" style="font-size:.8em; cursor:default;">── マスター管理 ──</span>

@@ -5,6 +5,7 @@
  * - クリックで明細展開/折りたたみ
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
@@ -24,44 +25,49 @@ $selected_date_jp = $dt->format('Y年n月j日');
 $is_today     = ($selected_date_raw === date('Y-m-d'));
 $edited_receipt = $_GET['edited'] ?? '';  // 訂正完了後のメッセージ用
 
-// FileMakerから取得
+// FileMakerから取得（500件超に対応するため offset でページング全件取得）
+function fetchAllPosRecords(fmRESTor $fm, array $query, array $sort, int $chunk = 500, int $maxPages = 50): array {
+    $all = []; $offset = 1;
+    for ($i = 0; $i < $maxPages; $i++) {
+        $r = $fm->findRecords(['query' => [$query], 'sort' => $sort, 'limit' => $chunk, 'offset' => $offset]);
+        if (($r['result']['messages'][0]['code'] ?? '0') === '401') break;
+        $data = $r['result']['response']['data'] ?? [];
+        if (!$data) break;
+        foreach ($data as $row) $all[] = $row;
+        if (count($data) < $chunk) break;
+        $offset += $chunk;
+    }
+    return $all;
+}
+
 $fm = new fmRESTor($host, $db, $layout_pos, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
-$query = [
-    'query' => [[
-        '店舗No'   => $store_id,
-        '販売日時' => $selected_date_fm,
-    ]],
-    'sort' => [
+$data = fetchAllPosRecords(
+    $fm,
+    ['店舗No' => $store_id, '販売日時' => $selected_date_fm],
+    [
         ['fieldName' => 'レシート番号',         'sortOrder' => 'ascend'],
         ['fieldName' => '作成情報タイムスタンプ','sortOrder' => 'ascend'],
-    ],
-    'limit' => 500,
-];
-
-$result  = $fm->findRecords($query);
+    ]
+);
 $records = [];
 $total   = 0;
 
-$fm_code = $result['result']['messages'][0]['code'] ?? '0';
-if ($fm_code !== '401') {
-    $data = $result['result']['response']['data'] ?? [];
-    foreach ($data as $row) {
-        $f = $row['fieldData'];
-        $records[] = [
-            'record_id'    => $row['recordId'] ?? '',   // ← 削除用に追加
-            'receipt_no'   => $f['レシート番号'] ?? '',
-            'timestamp'    => $f['作成情報タイムスタンプ'] ?? '',
-            'name'         => $f['商品名']    ?? '',
-            'bumon'        => $f['部門']      ?? '',
-            'tani'         => $f['販売単位']  ?? '',
-            'qty'          => (int)($f['数量']     ?? 0),
-            'price'        => (int)($f['本体価格'] ?? 0),
-            'nebiki_gaku'  => (int)($f['値引額']   ?? 0),
-            'nebiki_ritsu' => (float)($f['値引率'] ?? 0),
-            'kingaku'      => (int)($f['販売金額'] ?? 0),
-        ];
-        $total += (int)($f['販売金額'] ?? 0);
-    }
+foreach ($data as $row) {
+    $f = $row['fieldData'];
+    $records[] = [
+        'record_id'    => $row['recordId'] ?? '',   // ← 削除用に追加
+        'receipt_no'   => $f['レシート番号'] ?? '',
+        'timestamp'    => $f['作成情報タイムスタンプ'] ?? '',
+        'name'         => $f['商品名']    ?? '',
+        'bumon'        => $f['部門']      ?? '',
+        'tani'         => $f['販売単位']  ?? '',
+        'qty'          => (int)($f['数量']     ?? 0),
+        'price'        => (int)($f['本体価格'] ?? 0),
+        'nebiki_gaku'  => (int)($f['値引額']   ?? 0),
+        'nebiki_ritsu' => (float)($f['値引率'] ?? 0),
+        'kingaku'      => (int)($f['販売金額'] ?? 0),
+    ];
+    $total += (int)($f['販売金額'] ?? 0);
 }
 
 // レシート番号でグループ化

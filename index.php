@@ -3,6 +3,7 @@
  * File: index.php
  * ログイン状態をチェックし、適切なページへ振り分ける
  */
+require_once __DIR__ . '/session_config.php';
 session_start();
 
 // すでにログイン済みの場合は top.php へ

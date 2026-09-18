@@ -3,6 +3,7 @@
  * File: logout.php
  * セッションを破棄してログアウト処理を行う
  */
+require_once __DIR__ . '/session_config.php';
 session_start();
 
 // 1. セッション変数をすべて空にする

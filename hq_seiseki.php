@@ -95,8 +95,15 @@ $cy_week_keys = [];    // 当年に存在する週キー（週モード用）
 
 $r = $fm->findRecords(['query' => [['売上日' => $range_cy]], 'limit' => 2000]);
 if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
+    // 店舗No+売上日が重複しているレコードは1件に集約する（二重登録データによる集計ズレ防止）
+    $cy_rows_by_key = [];
     foreach ($r['result']['response']['data'] ?? [] as $row) {
         $f  = $row['fieldData'];
+        $sn = (string)($f['fk_店舗No'] ?? '');
+        $key = $sn . '|' . ($f['売上日'] ?? '');
+        $cy_rows_by_key[$key] = $f; // 同一店舗・同一日は後勝ち
+    }
+    foreach ($cy_rows_by_key as $f) {
         $sn = (string)($f['fk_店舗No'] ?? '');
         if ($sn === '') continue;
         $ts = hq_fm_ts($f['売上日'] ?? '');

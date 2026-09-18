@@ -5,6 +5,7 @@
  * - 数量・値引きの変更、行削除、新商品追加
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
         && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
@@ -14,28 +15,26 @@ if (!isset($_SESSION['store_id'])) {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 require_once __DIR__ . '/instore_codes.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
 
+// 部門マスタ（並び順昇順。bumon_API から取得。sales_entry.php と同方式）
+$bumon_master   = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
+$category_order = bumon_names($bumon_master);
+
 // インストアコード: FM account_API から取得（sales_entry.php と同方式）
 function _fetch_instore_codes_from_fm_edit(string $store_id, string $host, string $db,
                                             string $layout_account,
-                                            string $api_master_user, string $api_master_pass): array {
-    $dept_fields = [
-        '魚'     => 'インストアコード_魚',
-        '天ぷら' => 'インストアコード_天ぷら',
-        '惣菜'   => 'インストアコード_惣菜',
-        'イカ焼' => 'インストアコード_イカ焼',
-        '唐揚'   => 'インストアコード_唐揚',
-        'レジ袋' => 'インストアコード_レジ袋',
-    ];
+                                            string $api_master_user, string $api_master_pass,
+                                            array $dept_fields): array {
     try {
         $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
                                       $api_master_user, $api_master_pass,
                                       ['allowInsecure' => true]);
-        $res = $fm->findRecord([['店舗Ｎｏ' => $store_id]]);
+        $res = $fm->findRecords(['query' => [['店舗Ｎｏ' => $store_id]]]);
         $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
         $codes = [];
         foreach ($dept_fields as $cat => $field) {
@@ -49,7 +48,8 @@ function _fetch_instore_codes_from_fm_edit(string $store_id, string $host, strin
 }
 
 $ic_dept_fm = _fetch_instore_codes_from_fm_edit(
-    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass,
+    bumon_ic_field_map($bumon_master)
 );
 // フォールバック: instore_codes.php の静的設定
 $_ic_static = $instore_config[$store_id] ?? [];
@@ -175,18 +175,28 @@ $res2      = $fm2->getRecords(['_limit' => 500]);
 $all_products = [];
 foreach ($res2['result']['response']['data'] ?? [] as $row) {
     $f = $row['fieldData'];
-    $toriatsukai = trim($f['取扱店舗'] ?? '');
-    if ($toriatsukai !== '' && $toriatsukai !== $store_id) continue;
+    // 発売中の自店舗取扱い商品のみ（sales_entry.php と同方式。取扱店舗は繰り返しフィールドのため
+    // 単純な文字列比較ではなく getStorePositions() で全ポジションを見る必要がある）
+    if ((int)($f['発売中'] ?? 0) !== 1) continue;
+    $positions = getStorePositions($f);
+    if (!in_array($store_id, $positions, true)) continue;
     $n = trim($f['商品名'] ?? '');
     if ($n === '') continue;
+
+    // 本体価格：店舗別設定 → 本部設定の順にフォールバックし、セール価格があればさらに優先（sales_entry.php と同方式）
+    $store_honbai = getStoreHonbaiPrice($f, $store_id);
+    $base_price   = ($store_honbai > 0) ? $store_honbai : (int)($f['本体価格'] ?? 0);
+    $sale_price   = getStoreSalePrice($f, $store_id);
+
     $all_products[] = [
         'bumon' => trim($f['部門']     ?? ''),
         'name'  => $n,
+        'yomi'  => trim($f['よみがな'] ?? ''),
         'tani'  => trim($f['販売単位'] ?? ''),
-        'price' => (int)($f['本体価格'] ?? 0),
+        'price' => ($sale_price > 0) ? $sale_price : $base_price,
     ];
 }
-usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?? $a['name'], $b['yomi'] ?? $b['name']));
+usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?: $a['name'], $b['yomi'] ?: $b['name']));
 
 // 元データをJS用に整形
 $initial_cart = array_map(fn($it) => [
@@ -802,7 +812,7 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         if (!groups[b]) { groups[b] = []; order.push(b); }
         groups[b].push(it);
     });
-    var catOrder = ['魚','天ぷら','惣菜','唐揚'];
+    var catOrder = <?= json_encode($category_order, JSON_UNESCAPED_UNICODE) ?>;
     order.sort(function(a,b) {
         var ia = catOrder.indexOf(a); if (ia<0) ia=99;
         var ib = catOrder.indexOf(b); if (ib<0) ib=99;

@@ -35,3 +35,6 @@ Thumbs.db
 vendor/
 composer.lock
 
+# --- FileMaker（CSVインポート時に自動生成される変換ファイル）---
+*.fmp12
+

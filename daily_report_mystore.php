@@ -4,6 +4,7 @@
  * 当月の日別売上一覧 ＋ 昨対比（前年同日 / 前年同週同曜日）切り替え
  */
 use fmRESTor\fmRESTor;
+require_once __DIR__ . '/session_config.php';
 session_start();
 if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
@@ -50,6 +51,7 @@ if (($r1['result']['messages'][0]['code'] ?? '0') !== '401') {
         $this_data[] = $rec['fieldData'];
     }
 }
+$this_data = _dedupe_by_uriage_date($this_data);
 
 // 前年データ取得（同日・同週同曜日の両方に対応できる広めの範囲）
 $prev_data = [];
@@ -63,6 +65,7 @@ if (($r2['result']['messages'][0]['code'] ?? '0') !== '401') {
         $prev_data[] = $rec['fieldData'];
     }
 }
+$prev_data = _dedupe_by_uriage_date($prev_data);
 
 // ---- 前年ルックアップマップ構築 ----
 // キー: 日(DD)            → 前年同日
@@ -167,6 +170,15 @@ function _fm_to_ts(string $fm_date): int|false {
     if (!$fm_date) return false;
     $dt = \DateTime::createFromFormat('m/d/Y', $fm_date);
     return $dt ? $dt->getTimestamp() : false;
+}
+
+/** 売上日が重複しているレコードを1件に集約する（二重登録データによる集計ズレ防止） */
+function _dedupe_by_uriage_date(array $records): array {
+    $byDate = [];
+    foreach ($records as $f) {
+        $byDate[$f['売上日'] ?? ''] = $f; // 同一日は後勝ち
+    }
+    return array_values($byDate);
 }
 
 $week_ja = ['1'=>'月','2'=>'火','3'=>'水','4'=>'木','5'=>'金','6'=>'土','7'=>'日'];
@@ -296,6 +308,7 @@ include __DIR__ . '/header.php';
 .up   { color: #2e7d32; font-weight: bold; }
 .down { color: #c62828; font-weight: bold; }
 .even { color: #888; }
+.mikakunin { color: #e65100; font-weight: bold; }
 
 /* 合計行 */
 .day-table tr.total-row td {
@@ -465,6 +478,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         <th>曜</th>
         <th class="right">合計売上</th>
         <th class="right">客数</th>
+        <th class="right">上代</th>
+        <th class="right">上代達成率</th>
         <th class="right">前年</th>
         <th class="right">昨対</th>
         <th>状態</th>
@@ -473,9 +488,10 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
     <tbody>
 
     <?php
-    $tbl_total_this  = 0;
-    $tbl_total_prev  = 0;
-    $tbl_total_kyaku = 0;
+    $tbl_total_this   = 0;
+    $tbl_total_prev   = 0;
+    $tbl_total_kyaku  = 0;
+    $tbl_total_joudai = 0;
 
     for ($d = 1; $d <= $days_in_month; $d++):
         $ts    = mktime(0, 0, 0, $month, $d, $year);
@@ -491,6 +507,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
             : ($this_by_day[$day_j]   ?? null);
         $this_uriage = $f ? (int)($f['合計売上']   ?? 0) : 0;
         $this_kyaku  = $f ? (int)($f['客数_閉店後'] ?? 0) : 0;
+        $this_joudai = $f ? (int)($f['上代合計']   ?? 0) : 0;
+        $joudai_ritsu = ($this_joudai > 0) ? round($this_uriage / $this_joudai * 100, 1) : null;
         $jotai = $f ? ($f['入力状態'] ?? '未入力') : null;
 
         // 前年データ
@@ -506,8 +524,9 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         // 月計集計は当年データがある日のみ
         $is_future_day = ($ts > $today_ts);
         if ($f) {
-            $tbl_total_this  += $this_uriage;
-            $tbl_total_kyaku += $this_kyaku;
+            $tbl_total_this   += $this_uriage;
+            $tbl_total_kyaku  += $this_kyaku;
+            $tbl_total_joudai += $this_joudai;
             if ($prev_uriage > 0) $tbl_total_prev += $prev_uriage;
         }
 
@@ -524,6 +543,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
 
         $date_str  = date('n/j', $ts);
         $jotai_cls = $jotai !== null ? ($jotai_badge[$jotai] ?? 'secondary') : null;
+        $is_unconfirmed = ($f !== null && $jotai !== '確定');
+        $is_teikyu      = ($f !== null && (int)($f['定休日'] ?? 0) === 1);
 
         // 未来の日はグレーアウト
         $row_style = $is_future_day ? ' style="opacity:.5;"' : '';
@@ -535,6 +556,16 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         </a>
       </td>
       <td class="<?= $dow_cls ?>"><?= $dow ?></td>
+      <?php if ($is_unconfirmed): ?>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <?php elseif ($is_teikyu): ?>
+      <td class="right" colspan="6" style="text-align:center; color:#888;">🏠 定休日</td>
+      <?php else: ?>
       <td class="right">
         <?= $this_uriage > 0 ? '¥' . number_format($this_uriage) : '<span style="color:#ccc;">―</span>' ?>
       </td>
@@ -542,11 +573,18 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         <?= $this_kyaku > 0 ? number_format($this_kyaku) : '<span style="color:#ccc;">―</span>' ?>
       </td>
       <td class="right" style="color:#999; font-size:.9em;">
+        <?= $this_joudai > 0 ? '¥' . number_format($this_joudai) : '<span style="color:#ddd;">―</span>' ?>
+      </td>
+      <td class="right <?= $joudai_ritsu === null ? '' : ($joudai_ritsu >= 100 ? 'up' : 'down') ?>">
+        <?= $joudai_ritsu !== null ? $joudai_ritsu . '%' : '<span style="color:#ddd;">―</span>' ?>
+      </td>
+      <td class="right" style="color:#999; font-size:.9em;">
         <?= $prev_uriage > 0 ? '¥' . number_format($prev_uriage) : '<span style="color:#ddd;">―</span>' ?>
       </td>
       <td class="right <?= $sk_cls ?>">
         <?= $sakutai_pct !== null ? $sakutai_pct . '%' : '<span style="color:#ddd;">―</span>' ?>
       </td>
+      <?php endif; ?>
       <td>
         <?php if ($jotai_cls !== null): ?>
           <span class="badge bg-<?= $jotai_cls ?>" style="font-size:.72em;"><?= htmlspecialchars($jotai) ?></span>
@@ -554,8 +592,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       </td>
     </tr>
     <?php
-    // --- 部門別サブ行（当年データがある日のみ） ---
-    if ($f && !empty($active_busho)):
+    // --- 部門別サブ行（当年データが確定している日のみ） ---
+    if ($f && !$is_unconfirmed && !empty($active_busho)):
         $day_active = [];
         foreach ($active_busho as $field => $label) {
             $dcy = (int)($f[$field] ?? 0);
@@ -576,6 +614,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td class="dept-day-label"><?= htmlspecialchars($label) ?></td>
       <td class="right"><?= $dcy > 0 ? '¥' . number_format($dcy) : '<span style="color:#ccc;">―</span>' ?></td>
       <td class="right" style="color:#999; font-size:.9em;"></td>
+      <td class="right" style="color:#999; font-size:.9em;"></td>
+      <td class="right" style="color:#999; font-size:.9em;"></td>
       <td class="right" style="color:#999; font-size:.9em;"><?= $dpy > 0 ? '¥' . number_format($dpy) : '<span style="color:#ddd;">―</span>' ?></td>
       <td class="right <?= $dr_cls ?>"><?= $dr !== null ? $dr . '%' : '<span style="color:#ddd;">―</span>' ?></td>
       <td></td>
@@ -594,11 +634,17 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
     if ($total_sakutai !== null) {
         $total_sk_cls = $total_sakutai >= 105 ? 'up' : ($total_sakutai >= 95 ? 'even' : 'down');
     }
+    $total_joudai_ritsu = ($tbl_total_joudai > 0)
+        ? round($tbl_total_this / $tbl_total_joudai * 100, 1) : null;
     ?>
     <tr class="total-row">
       <td colspan="2">月　計</td>
       <td class="right">¥<?= number_format($tbl_total_this) ?></td>
       <td class="right"><?= number_format($tbl_total_kyaku) ?></td>
+      <td class="right" style="font-size:.9em;">¥<?= number_format($tbl_total_joudai) ?></td>
+      <td class="right <?= $total_joudai_ritsu === null ? '' : ($total_joudai_ritsu >= 100 ? 'up' : 'down') ?>">
+        <?= $total_joudai_ritsu !== null ? $total_joudai_ritsu . '%' : '―' ?>
+      </td>
       <td class="right" style="font-size:.9em;">¥<?= number_format($tbl_total_prev) ?></td>
       <td class="right <?= $total_sk_cls ?>">
         <?= $total_sakutai !== null ? $total_sakutai . '%' : '―' ?>
