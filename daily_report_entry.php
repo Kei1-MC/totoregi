@@ -322,6 +322,55 @@ if (($qrTeikyu['result']['messages'][0]['code'] ?? '0') !== '401') {
     }
 }
 
+// ---- 今月の店舗売上ランキング（自店の順位＋前後の店舗のみ。金額は非公開） ----
+// 表示中の日付が属する月の月初〜月末で全店舗を単純合計してランキングする。
+// 今月（進行中）なら未来日はまだデータが無いため自然に「現時点までの累計」になり、
+// 過去の（既に終わった）月ならその月の全日が揃っているため自然に「月末の確定順位」になる
+// ―― どちらも同じロジックで成立するため、進行中／過去で分岐する必要はない。
+$rank_year     = (int)$dt->format('Y');
+$rank_month    = (int)$dt->format('n');
+$rank_from_fm  = sprintf('%02d/01/%04d', $rank_month, $rank_year);
+$rank_last_day = (int)date('t', mktime(0, 0, 0, $rank_month, 1, $rank_year));
+$rank_to_fm    = sprintf('%02d/%02d/%04d', $rank_month, $rank_last_day, $rank_year);
+
+$rank_list = []; // 売上>0の店舗のみ、降順。各要素 ['sn','name','sales']
+$qrRank = $fm->findRecords([
+    'query' => [['売上日' => "{$rank_from_fm}...{$rank_to_fm}"]],
+    'limit' => 2000,
+]);
+if (($qrRank['result']['messages'][0]['code'] ?? '0') !== '401') {
+    // 店舗No+売上日が重複するレコードは1件に集約（hq_seiseki.phpと同様、二重登録データ対策）
+    $rank_rows_by_key = [];
+    foreach ($qrRank['result']['response']['data'] ?? [] as $row) {
+        $f  = $row['fieldData'];
+        $sn = (string)($f['fk_店舗No'] ?? '');
+        if ($sn === '') continue;
+        $rank_rows_by_key[$sn . '|' . ($f['売上日'] ?? '')] = $f;
+    }
+    $rank_sums = []; // sn => ['sn','name','sales']
+    foreach ($rank_rows_by_key as $f) {
+        $sn = (string)($f['fk_店舗No'] ?? '');
+        if (!isset($rank_sums[$sn])) {
+            $rank_sums[$sn] = ['sn' => $sn, 'name' => $f['店舗名'] ?? $sn, 'sales' => 0];
+        }
+        $rank_sums[$sn]['sales'] += (int)($f['合計売上'] ?? 0);
+    }
+    // まだ今月の売上実績が無い店舗（新規出店・入力前）はランキング対象外
+    $rank_list = array_values(array_filter($rank_sums, fn($s) => $s['sales'] > 0));
+    usort($rank_list, fn($a, $b) => $a['sales'] !== $b['sales']
+        ? $b['sales'] <=> $a['sales']
+        : strcmp($a['sn'], $b['sn']));
+}
+
+$rank_total = count($rank_list);
+$rank_my_index = null;
+foreach ($rank_list as $i => $r) {
+    if ($r['sn'] === $store_id) { $rank_my_index = $i; break; }
+}
+$rank_my    = ($rank_my_index !== null) ? $rank_my_index + 1 : null;
+$rank_above = ($rank_my_index !== null && $rank_my_index > 0) ? $rank_list[$rank_my_index - 1] : null;
+$rank_below = ($rank_my_index !== null && $rank_my_index < $rank_total - 1) ? $rank_list[$rank_my_index + 1] : null;
+
 // ---- 実績のある部門（自店の取扱部門設定が未選択でも、日報保存済みの値や
 //      レジの実績がある部門は非表示にしない） ----
 $busho_has_data = [];
@@ -631,6 +680,27 @@ include __DIR__ . '/header.php';
 .busho-cmp { display: none; }
 .busho-cmp.active { display: contents; }
 
+/* 店舗ランキング（自店の順位＋前後の店舗のみ・金額は非公開） */
+.rank-list { list-style: none; margin: 0; padding: 0; }
+.rank-row {
+    display: flex; align-items: center; gap: 0.7em;
+    padding: 0.45em 0.3em;
+    font-size: 0.9em;
+    border-bottom: 1px solid #eee;
+}
+.rank-row:last-child { border-bottom: none; }
+.rank-row .rank-num {
+    flex-shrink: 0; width: 3em; text-align: right;
+    font-weight: bold; color: #888;
+}
+.rank-row.rank-me {
+    background: #e0f2f1;
+    border-radius: 0.5em;
+    font-weight: bold;
+}
+.rank-row.rank-me .rank-num { color: #004d40; }
+.rank-row.rank-me .rank-name { color: #004d40; }
+
 /* 確定バナー */
 .kakutei-banner {
     background: #e8f5e9; border: 2px solid #4caf50;
@@ -772,6 +842,37 @@ include __DIR__ . '/header.php';
       </form>
     </div>
   <?php endif; ?>
+
+  <!-- 今月の店舗ランキング -->
+  <div class="dr-section">
+    <div class="dr-section-head">🏆 今月の店舗ランキング（<?= $rank_month ?>月<?= $rank_total > 0 ? '・全' . $rank_total . '店舗中' : '' ?>）</div>
+    <div class="dr-section-body">
+      <?php if ($rank_my === null): ?>
+        <div style="font-size:0.85em; color:#888; text-align:center; padding:0.3em 0;">
+          今月はまだ売上実績がありません。
+        </div>
+      <?php else: ?>
+        <ul class="rank-list">
+          <?php if ($rank_above): ?>
+            <li class="rank-row">
+              <span class="rank-num"><?= $rank_my - 1 ?>位</span>
+              <span class="rank-name"><?= htmlspecialchars($rank_above['name']) ?></span>
+            </li>
+          <?php endif; ?>
+          <li class="rank-row rank-me">
+            <span class="rank-num"><?= $rank_my ?>位</span>
+            <span class="rank-name"><?= htmlspecialchars($store_name) ?>（自店）</span>
+          </li>
+          <?php if ($rank_below): ?>
+            <li class="rank-row">
+              <span class="rank-num"><?= $rank_my + 1 ?>位</span>
+              <span class="rank-name"><?= htmlspecialchars($rank_below['name']) ?></span>
+            </li>
+          <?php endif; ?>
+        </ul>
+      <?php endif; ?>
+    </div>
+  </div>
 
   <div class="dr-section">
     <div class="dr-section-head">🏠 定休日</div>
