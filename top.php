@@ -26,25 +26,32 @@ $today_total  = 0;
 $today_count  = 0;
 $receipt_count = 0;
 
-$fm = new fmRESTor($host, $db, $layout_pos, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
-$query = [
-    'query' => [[ '店舗No' => $store_id, '販売日時' => $today_fm ]],
-    'limit' => 500,
-];
-$result  = $fm->findRecords($query);
-$fm_code = $result['result']['messages'][0]['code'] ?? '0';
-if ($fm_code !== '401') {
-    $data = $result['result']['response']['data'] ?? [];
-    $receipt_nos = [];
-    foreach ($data as $row) {
-        $f = $row['fieldData'];
-        $today_total += (int)($f['販売金額'] ?? 0);
-        $today_count++;
-        $rno = $f['レシート番号'] ?? '';
-        if ($rno !== '' && !in_array($rno, $receipt_nos)) $receipt_nos[] = $rno;
+// 500件超に対応するため offset でページング全件取得（sales_list.phpと同方式）
+function fetchAllPosRecords(fmRESTor $fm, array $query, int $chunk = 500, int $maxPages = 50): array {
+    $all = []; $offset = 1;
+    for ($i = 0; $i < $maxPages; $i++) {
+        $r = $fm->findRecords(['query' => [$query], 'limit' => $chunk, 'offset' => $offset]);
+        if (($r['result']['messages'][0]['code'] ?? '0') === '401') break;
+        $data = $r['result']['response']['data'] ?? [];
+        if (!$data) break;
+        foreach ($data as $row) $all[] = $row;
+        if (count($data) < $chunk) break;
+        $offset += $chunk;
     }
-    $receipt_count = count($receipt_nos);
+    return $all;
 }
+
+$fm = new fmRESTor($host, $db, $layout_pos, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+$data = fetchAllPosRecords($fm, ['店舗No' => $store_id, '販売日時' => $today_fm]);
+$receipt_nos = [];
+foreach ($data as $row) {
+    $f = $row['fieldData'];
+    $today_total += (int)($f['販売金額'] ?? 0);
+    $today_count++;
+    $rno = $f['レシート番号'] ?? '';
+    if ($rno !== '' && !in_array($rno, $receipt_nos)) $receipt_nos[] = $rno;
+}
+$receipt_count = count($receipt_nos);
 
 // 未確定日報チェック（昨日以前・直近60日）
 $unconfirmed_dates = [];
