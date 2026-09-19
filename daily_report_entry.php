@@ -367,9 +367,18 @@ $rank_my_index = null;
 foreach ($rank_list as $i => $r) {
     if ($r['sn'] === $store_id) { $rank_my_index = $i; break; }
 }
-$rank_my    = ($rank_my_index !== null) ? $rank_my_index + 1 : null;
-$rank_above = ($rank_my_index !== null && $rank_my_index > 0) ? $rank_list[$rank_my_index - 1] : null;
-$rank_below = ($rank_my_index !== null && $rank_my_index < $rank_total - 1) ? $rank_list[$rank_my_index + 1] : null;
+
+// 自店を中心に3件（自店＋前後1件ずつ）のウインドウを作る。自店が1位・最下位付近で
+// 片側が無い場合は、常に3件（可能な限り）表示できるよう反対側にずらす
+$rank_window = [];
+if ($rank_my_index !== null) {
+    $win_start = $rank_my_index - 1;
+    $win_end   = $rank_my_index + 1;
+    if ($win_start < 0) { $win_end += -$win_start; $win_start = 0; }
+    if ($win_end > $rank_total - 1) { $win_start -= ($win_end - ($rank_total - 1)); $win_end = $rank_total - 1; }
+    $win_start = max(0, $win_start);
+    for ($i = $win_start; $i <= $win_end; $i++) $rank_window[] = $i;
+}
 
 // ---- 実績のある部門（自店の取扱部門設定が未選択でも、日報保存済みの値や
 //      レジの実績がある部門は非表示にしない） ----
@@ -850,28 +859,24 @@ include __DIR__ . '/header.php';
   <div class="dr-section">
     <div class="dr-section-head">🏆 今月の店舗ランキング（<?= $rank_month ?>月<?= $rank_total > 0 ? '・全' . $rank_total . '店舗中' : '' ?>）</div>
     <div class="dr-section-body">
-      <?php if ($rank_my === null): ?>
+      <?php if ($rank_my_index === null): ?>
         <div style="font-size:0.85em; color:#888; text-align:center; padding:0.3em 0;">
           今月はまだ売上実績がありません。
         </div>
       <?php else: ?>
         <ul class="rank-list">
-          <?php if ($rank_above): ?>
-            <li class="rank-row">
-              <span class="rank-num"><?= $rank_my - 1 ?>位　<?= rankMedal($rank_my - 1) ?></span>
-              <span class="rank-name"><?= htmlspecialchars($rank_above['name']) ?></span>
+          <?php foreach ($rank_window as $i):
+            $is_me = ($i === $rank_my_index);
+            $r     = $rank_list[$i];
+            $rank  = $i + 1;
+          ?>
+            <li class="rank-row <?= $is_me ? 'rank-me' : '' ?>">
+              <span class="rank-num"><?= $rank ?>位　<?= rankMedal($rank) ?></span>
+              <span class="rank-name">
+                <?= $is_me ? htmlspecialchars($store_name) . '（自店）' : htmlspecialchars($r['name']) ?>
+              </span>
             </li>
-          <?php endif; ?>
-          <li class="rank-row rank-me">
-            <span class="rank-num"><?= $rank_my ?>位　<?= rankMedal($rank_my) ?></span>
-            <span class="rank-name"><?= htmlspecialchars($store_name) ?>（自店）</span>
-          </li>
-          <?php if ($rank_below): ?>
-            <li class="rank-row">
-              <span class="rank-num"><?= $rank_my + 1 ?>位　<?= rankMedal($rank_my + 1) ?></span>
-              <span class="rank-name"><?= htmlspecialchars($rank_below['name']) ?></span>
-            </li>
-          <?php endif; ?>
+          <?php endforeach; ?>
         </ul>
       <?php endif; ?>
     </div>
