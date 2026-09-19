@@ -388,6 +388,9 @@ function fv(array $fd, string $key): string {
     $v = (int)($fd[$key] ?? 0);
     return $v > 0 ? number_format($v) : '';
 }
+function rankMedal(int $rank): string {
+    return match ($rank) { 1 => '👑', 2 => '🥈', 3 => '🥉', default => '' };
+}
 function py(array $py_fd, string $key): string {
     $v = (int)($py_fd[$key] ?? 0);
     return $v > 0 ? number_format($v) : '―';
@@ -690,8 +693,8 @@ include __DIR__ . '/header.php';
 }
 .rank-row:last-child { border-bottom: none; }
 .rank-row .rank-num {
-    flex-shrink: 0; width: 3em; text-align: right;
-    font-weight: bold; color: #888;
+    flex-shrink: 0; min-width: 3em; text-align: right;
+    font-weight: bold; color: #888; white-space: nowrap;
 }
 .rank-row.rank-me {
     background: #e0f2f1;
@@ -855,17 +858,17 @@ include __DIR__ . '/header.php';
         <ul class="rank-list">
           <?php if ($rank_above): ?>
             <li class="rank-row">
-              <span class="rank-num"><?= $rank_my - 1 ?>位</span>
+              <span class="rank-num"><?= $rank_my - 1 ?>位　<?= rankMedal($rank_my - 1) ?></span>
               <span class="rank-name"><?= htmlspecialchars($rank_above['name']) ?></span>
             </li>
           <?php endif; ?>
           <li class="rank-row rank-me">
-            <span class="rank-num"><?= $rank_my ?>位</span>
+            <span class="rank-num"><?= $rank_my ?>位　<?= rankMedal($rank_my) ?></span>
             <span class="rank-name"><?= htmlspecialchars($store_name) ?>（自店）</span>
           </li>
           <?php if ($rank_below): ?>
             <li class="rank-row">
-              <span class="rank-num"><?= $rank_my + 1 ?>位</span>
+              <span class="rank-num"><?= $rank_my + 1 ?>位　<?= rankMedal($rank_my + 1) ?></span>
               <span class="rank-name"><?= htmlspecialchars($rank_below['name']) ?></span>
             </li>
           <?php endif; ?>
