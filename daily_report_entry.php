@@ -332,11 +332,12 @@ foreach (array_keys($all_busho) as $bf) {
 }
 
 // ---- ヘルパー ----
-function _int(string $key): int { return (int)($_POST[$key] ?? 0); }
+// 入力欄は位取りカンマ表示のため type="text" で送信されるので、カンマを除去してから数値化する
+function _int(string $key): int { return (int)str_replace(',', '', (string)($_POST[$key] ?? '0')); }
 
 function fv(array $fd, string $key): string {
     $v = (int)($fd[$key] ?? 0);
-    return $v > 0 ? (string)$v : '';
+    return $v > 0 ? number_format($v) : '';
 }
 function py(array $py_fd, string $key): string {
     $v = (int)($py_fd[$key] ?? 0);
@@ -848,9 +849,9 @@ include __DIR__ . '/header.php';
         <div class="cmp-grid">
           <span class="cmp-label">上代合計</span>
           <div>
-            <input class="cmp-input" type="number" name="上代合計"
-                   inputmode="numeric" value="<?= fv($fd, '上代合計') ?>"
-                   <?= $is_future_page ? 'disabled' : '' ?> min="0">
+            <input class="cmp-input" type="text" inputmode="numeric" name="上代合計"
+                   value="<?= fv($fd, '上代合計') ?>"
+                   <?= $is_future_page ? 'disabled' : '' ?>>
             <span class="cmp-unit">円</span>
           </div>
           <div class="cmp-py"></div>
@@ -925,7 +926,7 @@ include __DIR__ . '/header.php';
       $pyv_k = (int)($py_fd[$field_kyaku] ?? 0);
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">客　数</span>';
-      echo '<div><input class="cmp-input" id="kyaku-input-' . $suffix . '" type="number" name="' . $field_kyaku . '" inputmode="numeric" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">人</span></div>';
+      echo '<div><input class="cmp-input" id="kyaku-input-' . $suffix . '" type="text" inputmode="numeric" name="' . $field_kyaku . '" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . '><span class="cmp-unit">人</span></div>';
       echo '<div class="cmp-tr">' . trCount($tr) . '</div>';
       echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
@@ -933,7 +934,7 @@ include __DIR__ . '/header.php';
       // 累計売上（部門別ではなく時間帯合計のみ）
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">累計売上</span>';
-      echo '<div><input class="cmp-input" id="uriage-input-' . $suffix . '" type="number" name="' . $field_uriage . '" inputmode="numeric" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
+      echo '<div><input class="cmp-input" id="uriage-input-' . $suffix . '" type="text" inputmode="numeric" name="' . $field_uriage . '" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . '><span class="cmp-unit">円</span></div>';
       echo '<div class="cmp-tr">' . trSum($tr) . '</div>';
       echo '<div class="cmp-py">' . ($py_uriage_val > 0 ? '<span class="py-val">¥' . number_format($py_uriage_val) . '</span>' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
@@ -1003,9 +1004,9 @@ include __DIR__ . '/header.php';
         <div class="cmp-grid busho-cmp" data-field="<?= $field ?>">
           <span class="cmp-label"><?= $label ?></span>
           <div>
-            <input class="cmp-input busho-input" type="number" name="<?= $field ?>"
-                   inputmode="numeric" value="<?= fv($fd, $field) ?>"
-                   <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?> min="0">
+            <input class="cmp-input busho-input" type="text" inputmode="numeric" name="<?= $field ?>"
+                   value="<?= fv($fd, $field) ?>"
+                   <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?>>
             <span class="cmp-unit">円</span>
           </div>
           <div class="cmp-py">
@@ -1033,9 +1034,9 @@ include __DIR__ . '/header.php';
           <div class="cmp-grid">
             <span class="cmp-label">客数合計</span>
             <div>
-              <input class="cmp-input" type="number" name="客数_閉店後"
-                     inputmode="numeric" value="<?= fv($fd, '客数_閉店後') ?>"
-                     <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?> min="0">
+              <input class="cmp-input" type="text" inputmode="numeric" name="客数_閉店後"
+                     value="<?= fv($fd, '客数_閉店後') ?>"
+                     <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?>>
               <span class="cmp-unit">人</span>
             </div>
             <div class="cmp-tr"><?= trCount($tr_all) ?></div>
@@ -1069,6 +1070,16 @@ const DR_DATE   = <?= json_encode($target_date_fm) ?>;
 // ある部門は常に表示する
 const BUSHO_HAS_DATA = <?= json_encode($busho_has_data, JSON_UNESCAPED_UNICODE) ?>;
 
+// ---- 数字入力欄の位取りカンマ表示 ----
+function digitsOnly(v) { return String(v || '').replace(/[^0-9]/g, ''); }
+function formatComma(v) {
+    const d = digitsOnly(v);
+    return d === '' ? '' : parseInt(d, 10).toLocaleString('en-US');
+}
+document.querySelectorAll('.cmp-input').forEach(el => {
+    el.addEventListener('input', () => { el.value = formatComma(el.value); });
+});
+
 // ---- レジの実績を反映 ----
 // ボタンを押した時点で毎回サーバーに最新の pos_records を問い合わせて集計するため、
 // ページを開いてからしばらく経っていたり、押すタイミングが12/15/17時ちょうどから
@@ -1091,9 +1102,9 @@ async function reflectRegi(suffix, btn) {
             return;
         }
         const kyakuInput = document.getElementById('kyaku-input-' + suffix);
-        if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = data.kyaku || '';
+        if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = formatComma(data.kyaku);
         const uriageInput = document.getElementById('uriage-input-' + suffix);
-        if (uriageInput && !uriageInput.disabled) uriageInput.value = data.sum || '';
+        if (uriageInput && !uriageInput.disabled) uriageInput.value = formatComma(data.sum);
     } catch (err) {
         alert('通信エラー: ' + err.message);
     } finally {
@@ -1131,7 +1142,7 @@ document.addEventListener('submit', function (e) {
 function calcGoukeiFor(inputClass, totalElId) {
     let total = 0;
     document.querySelectorAll('.' + inputClass).forEach(el => {
-        total += parseInt(el.value || 0, 10);
+        total += parseInt(digitsOnly(el.value) || '0', 10);
     });
     const el = document.getElementById(totalElId);
     if (el) el.textContent = total > 0 ? '¥' + total.toLocaleString() : '―';
