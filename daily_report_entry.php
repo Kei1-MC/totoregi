@@ -526,7 +526,7 @@ include __DIR__ . '/header.php';
 /* 合計行 */
 .total-bar {
     display: grid;
-    grid-template-columns: 4em 1fr 4.5em 4.5em;
+    grid-template-columns: 4em 1fr minmax(4.5em, auto) minmax(4.5em, auto);
     align-items: center;
     gap: 0.4em 0.4em;
     padding: 0.4em 0 0;
@@ -1022,7 +1022,7 @@ include __DIR__ . '/header.php';
           </span>
           <span class="t-tr"><?= trSum($tr_all) ?></span>
           <span class="t-py">
-            <?= $goukei_py_fm > 0 ? '前年 ¥' . number_format($goukei_py_fm) : '' ?>
+            <?= $goukei_py_fm > 0 ? '¥' . number_format($goukei_py_fm) : '' ?>
           </span>
         </div>
 
