@@ -87,11 +87,11 @@ $all_busho = [
 
 // ---- 上代（毎日1回・「今日はこれだけ売るつもり」の合計目標額。部門別ではなく合計のみ入力） ----
 
-// ---- 時間帯別 部門売上フィールド（12時/15時/17時。閉店後と同じ部門構成） ----
+// ---- 時間帯別 客数・累計売上フィールド（12時/15時/17時。累計売上は部門別ではなく合計のみ入力） ----
 $time_slots = [
-    '12' => ['label' => '🕛 12時', 'action' => 'save_12', 'fm_suffix' => '12時', 'field_kyaku' => '客数_12時', 'cutoff' => '12:00:00'],
-    '15' => ['label' => '🕒 15時', 'action' => 'save_15', 'fm_suffix' => '15時', 'field_kyaku' => '客数_15時', 'cutoff' => '15:00:00'],
-    '17' => ['label' => '🕔 17時', 'action' => 'save_17', 'fm_suffix' => '17時', 'field_kyaku' => '客数_17時', 'cutoff' => '17:00:00'],
+    '12' => ['label' => '🕛 12時', 'action' => 'save_12', 'fm_suffix' => '12時', 'field_kyaku' => '客数_12時', 'field_uriage' => '売上累計_12時', 'cutoff' => '12:00:00'],
+    '15' => ['label' => '🕒 15時', 'action' => 'save_15', 'fm_suffix' => '15時', 'field_kyaku' => '客数_15時', 'field_uriage' => '売上累計_15時', 'cutoff' => '15:00:00'],
+    '17' => ['label' => '🕔 17時', 'action' => 'save_17', 'fm_suffix' => '17時', 'field_kyaku' => '客数_17時', 'field_uriage' => '売上累計_17時', 'cutoff' => '17:00:00'],
 ];
 function bushoTimeField(string $bushoField, string $fmSuffix): string {
     return $bushoField . '_' . $fmSuffix;
@@ -165,7 +165,7 @@ if ($is_reflect_ajax) {
         exit();
     }
     $agg = totoregiAgg($pos_records, $time_slots[$slot_key]['cutoff'], $all_busho);
-    echo json_encode(['ok' => true, 'kyaku' => $agg['count'], 'busho' => $agg['by_field']]);
+    echo json_encode(['ok' => true, 'kyaku' => $agg['count'], 'sum' => $agg['sum']]);
     exit();
 }
 
@@ -200,11 +200,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $save['上代合計'] = _int('上代合計');
     } elseif (isset($time_slot_by_action[$action])) {
         $slot = $time_slot_by_action[$action];
-        $save[$slot['field_kyaku']] = _int($slot['field_kyaku']);
-        foreach (array_keys($all_busho) as $bf) {
-            $tf = bushoTimeField($bf, $slot['fm_suffix']);
-            $save[$tf] = _int($tf);
-        }
+        $save[$slot['field_kyaku']]  = _int($slot['field_kyaku']);
+        $save[$slot['field_uriage']] = _int($slot['field_uriage']);
     } elseif ($action === 'save_heiten' || $action === 'kakutei') {
         foreach (array_keys($all_busho) as $f) {
             $save[$f] = _int($f);
@@ -222,7 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $save['客数_閉店後']   = 0;
         foreach ($time_slots as $slot) {
-            $save[$slot['field_kyaku']] = 0;
+            $save[$slot['field_kyaku']]  = 0;
+            $save[$slot['field_uriage']] = 0;
             foreach (array_keys($all_busho) as $bf) {
                 $save[bushoTimeField($bf, $slot['fm_suffix'])] = 0;
             }
@@ -329,9 +327,6 @@ if (($qrTeikyu['result']['messages'][0]['code'] ?? '0') !== '401') {
 $busho_has_data = [];
 foreach (array_keys($all_busho) as $bf) {
     $has = ((int)($fd[$bf] ?? 0) > 0)
-        || ((int)($fd[bushoTimeField($bf, '12時')] ?? 0) > 0)
-        || ((int)($fd[bushoTimeField($bf, '15時')] ?? 0) > 0)
-        || ((int)($fd[bushoTimeField($bf, '17時')] ?? 0) > 0)
         || (($tr_all['by_field'][$bf] ?? 0) > 0);
     if ($has) $busho_has_data[] = $bf;
 }
@@ -896,7 +891,7 @@ include __DIR__ . '/header.php';
       <span>ととレジ</span>
       <span>前年同曜日</span>
   </div>';
-  // 部門別行のヘッダー（ととレジ列は部門別実績が無いため空欄）
+  // 部門別行のヘッダー（ととレジ列は部門別実績が無いため空欄。閉店後で使用）
   $cmp_header_bumon = '<div class="cmp-header">
       <span></span>
       <span class="h-input">本　年</span>
@@ -904,24 +899,19 @@ include __DIR__ . '/header.php';
       <span>前年同曜日</span>
   </div>';
 
-  // 時間帯セクション出力関数（客数は時間帯合計のみ、売上は閉店後と同じ部門別入力）
-  function timeSec(string $suffix, array $slot, array $all_busho,
+  // 時間帯セクション出力関数（客数・累計売上とも時間帯合計のみ入力。部門別入力は閉店後のみ）
+  function timeSec(string $suffix, array $slot,
                    array $fd, array $py_fd, bool $is_kakutei,
-                   string $cmp_header, string $cmp_header_bumon, array $tr): void {
-      $label       = $slot['label'];
-      $action      = $slot['action'];
-      $field_kyaku = $slot['field_kyaku'];
-      $fm_suffix   = $slot['fm_suffix'];
+                   string $cmp_header, array $tr): void {
+      $label        = $slot['label'];
+      $action       = $slot['action'];
+      $field_kyaku  = $slot['field_kyaku'];
+      $field_uriage = $slot['field_uriage'];
 
-      $uriage_total    = 0;
-      $py_uriage_total = 0;
-      foreach ($all_busho as $bf => $_) {
-          $tf = bushoTimeField($bf, $fm_suffix);
-          $uriage_total    += (int)($fd[$tf] ?? 0);
-          $py_uriage_total += (int)($py_fd[$tf] ?? 0);
-      }
+      $uriage_val    = (int)($fd[$field_uriage] ?? 0);
+      $py_uriage_val = (int)($py_fd[$field_uriage] ?? 0);
 
-      $done = (int)($fd[$field_kyaku] ?? 0) > 0 || $uriage_total > 0;
+      $done = (int)($fd[$field_kyaku] ?? 0) > 0 || $uriage_val > 0;
       echo '<div class="dr-section" id="dr-section-' . $suffix . '">';
       echo '<div class="dr-section-head">' . $label;
       if ($done) echo ' <span class="done-mark">✓ 入力済</span>';
@@ -930,7 +920,7 @@ include __DIR__ . '/header.php';
       echo '<form method="post">';
       echo '<input type="hidden" name="action" value="' . $action . '">';
 
-      // 客数（時間帯合計のみ・今まで通り）
+      // 客数（時間帯合計のみ）
       echo $cmp_header;
       $pyv_k = (int)($py_fd[$field_kyaku] ?? 0);
       echo '<div class="cmp-grid">';
@@ -940,24 +930,12 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
-      // 累計売上（部門別入力・自店の取扱部門設定を共用）
-      echo $cmp_header_bumon;
-      foreach ($all_busho as $bf => $blabel) {
-          $tf  = bushoTimeField($bf, $fm_suffix);
-          $pyv = (int)($py_fd[$tf] ?? 0);
-          echo '<div class="cmp-grid busho-cmp" data-field="' . $bf . '">';
-          echo '<span class="cmp-label">' . $blabel . '</span>';
-          echo '<div><input class="cmp-input busho-input-' . $suffix . '" type="number" name="' . $tf . '" inputmode="numeric" value="' . fv($fd, $tf) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
-          echo '<div class="cmp-py">' . ($pyv > 0 ? '<span class="py-val">¥' . number_format($pyv) . '</span>' : '<span class="py-none">―</span>') . '</div>';
-          echo '</div>';
-      }
-
-      // 累計売上 合計行
-      echo '<div class="total-bar">';
-      echo '<span class="t-label">累計売上</span>';
-      echo '<span class="t-this" id="busho-goukei-' . $suffix . '">' . ($uriage_total > 0 ? '¥' . number_format($uriage_total) : '―') . '</span>';
-      echo '<span class="t-tr">' . trSum($tr) . '</span>';
-      echo '<span class="t-py">' . ($py_uriage_total > 0 ? '前年 ¥' . number_format($py_uriage_total) : '') . '</span>';
+      // 累計売上（部門別ではなく時間帯合計のみ）
+      echo '<div class="cmp-grid">';
+      echo '<span class="cmp-label">累計売上</span>';
+      echo '<div><input class="cmp-input" id="uriage-input-' . $suffix . '" type="number" name="' . $field_uriage . '" inputmode="numeric" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
+      echo '<div class="cmp-tr">' . trSum($tr) . '</div>';
+      echo '<div class="cmp-py">' . ($py_uriage_val > 0 ? '<span class="py-val">¥' . number_format($py_uriage_val) . '</span>' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
       if (!$is_kakutei) {
@@ -971,8 +949,8 @@ include __DIR__ . '/header.php';
   ?>
 
   <?php foreach ($time_slots as $suffix => $slot): ?>
-    <?php timeSec($suffix, $slot, $all_busho, $fd, $py_fd, $is_kakutei || $is_future_page,
-        $cmp_header, $cmp_header_bumon, ${'tr_' . $suffix}); ?>
+    <?php timeSec($suffix, $slot, $fd, $py_fd, $is_kakutei || $is_future_page,
+        $cmp_header, ${'tr_' . $suffix}); ?>
   <?php endforeach; ?>
 
   <!-- 閉店後 -->
@@ -1112,25 +1090,10 @@ async function reflectRegi(suffix, btn) {
             }
             return;
         }
-        const sec = document.getElementById('dr-section-' + suffix);
-        if (sec) {
-            sec.querySelectorAll('.busho-cmp').forEach(row => {
-                const bf = row.dataset.field;
-                const input = row.querySelector('.busho-input-' + suffix);
-                if (input && !input.disabled) {
-                    const v = data.busho[bf] || 0;
-                    input.value = v > 0 ? v : '';
-                    // 反映した部門は、ページ読込後に初めて実績が付いた場合でも
-                    // 以後すべてのセクションで表示する
-                    if (v > 0 && !BUSHO_HAS_DATA.includes(bf)) BUSHO_HAS_DATA.push(bf);
-                }
-            });
-        }
         const kyakuInput = document.getElementById('kyaku-input-' + suffix);
         if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = data.kyaku || '';
-        const saved = localStorage.getItem(BUMON_KEY);
-        applyBumonSetting(saved ? JSON.parse(saved) : []);
-        calcGoukeiFor('busho-input-' + suffix, 'busho-goukei-' + suffix);
+        const uriageInput = document.getElementById('uriage-input-' + suffix);
+        if (uriageInput && !uriageInput.disabled) uriageInput.value = data.sum || '';
     } catch (err) {
         alert('通信エラー: ' + err.message);
     } finally {
@@ -1163,7 +1126,7 @@ document.addEventListener('submit', function (e) {
     });
 }, true);
 
-// ---- 部門合計リアルタイム計算（閉店後・12時・15時・17時 共通） ----
+// ---- 部門合計リアルタイム計算（閉店後） ----
 // 非表示の部門でも送信される（0として計上）ため、合計は表示状態に関係なく全フィールドで計算する
 function calcGoukeiFor(inputClass, totalElId) {
     let total = 0;
@@ -1173,16 +1136,8 @@ function calcGoukeiFor(inputClass, totalElId) {
     const el = document.getElementById(totalElId);
     if (el) el.textContent = total > 0 ? '¥' + total.toLocaleString() : '―';
 }
-const BUSHO_TOTAL_TARGETS = [
-    ['busho-input',    'busho-goukei'],
-    ['busho-input-12', 'busho-goukei-12'],
-    ['busho-input-15', 'busho-goukei-15'],
-    ['busho-input-17', 'busho-goukei-17'],
-];
-BUSHO_TOTAL_TARGETS.forEach(([inputClass, totalElId]) => {
-    document.querySelectorAll('.' + inputClass).forEach(el => {
-        el.addEventListener('input', () => calcGoukeiFor(inputClass, totalElId));
-    });
+document.querySelectorAll('.busho-input').forEach(el => {
+    el.addEventListener('input', () => calcGoukeiFor('busho-input', 'busho-goukei'));
 });
 
 // ---- 部門設定 localStorage ----
