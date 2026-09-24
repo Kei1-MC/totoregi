@@ -25,6 +25,15 @@ $ic_cols = array_map(fn($b) => [
     'field' => 'インストアコード_' . $b['name'],
 ], $bumon_master);
 
+// 部門タブ設定（レジ画面の表示/非表示・並び順。店舗ごとにaccount_APIへ保存）
+$tab_cols = array_map(fn($b) => [
+    'key_hide'    => 'hide_' . $b['cd'],
+    'key_order'   => 'ord_'  . $b['cd'],
+    'label'       => $b['name'],
+    'field_hide'  => '非表示_' . $b['name'],
+    'field_order' => '表示順_' . $b['name'],
+], $bumon_master);
+
 /* =====================================================================
    AJAX ハンドラー（POST）
    ===================================================================== */
@@ -45,6 +54,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         // 閉店日（空の場合は空文字のままFMに渡す）
         $fields['閉店日'] = $heiten_bi;
+
+        // 部門タブ設定（表示/非表示・並び順）
+        foreach ($tab_cols as $c) {
+            $fields[$c['field_hide']]  = ((int)($_POST[$c['key_hide']] ?? 0) === 1) ? 1 : 0;
+            $fields[$c['field_order']] = trim($_POST[$c['key_order']] ?? '');
+        }
 
         $res  = $fm->editRecord($rid, ['fieldData' => $fields]);
         $code = $res['result']['messages'][0]['code'] ?? '500';
@@ -215,6 +230,22 @@ include __DIR__ . '/hq_header.php';
 .save-msg.ok  { background: #e8f5e9; color: #2e7d32; }
 .save-msg.err { background: #fce4ec; color: #c62828; }
 
+/* 部門タブ設定（表示・並び順） */
+.tab-settings { margin-top: 1em; }
+.tab-settings h5 {
+    font-size: 0.88em; color: var(--hq-accent); margin: 0 0 0.5em;
+    border-left: 3px solid var(--hq-accent); padding-left: 0.5em;
+}
+.tab-settings-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+.tab-settings-table th {
+    background: #eceffd; color: var(--hq-accent);
+    padding: 0.3em 0.5em; text-align: center; font-weight: bold;
+}
+.tab-settings-table td { padding: 0.25em 0.5em; border-bottom: 1px solid #eee; text-align: center; }
+.tab-settings-table td.label-cell { text-align: left; font-weight: bold; }
+.tab-hide-cb { width: 1.2em; height: 1.2em; cursor: pointer; }
+.tab-order-input { width: 4em; padding: 0.2em 0.3em; border: 1.5px solid #ccc; border-radius: 0.3em; text-align: center; }
+
 /* 凡例 */
 .legend {
     font-size: 0.8em;
@@ -334,6 +365,37 @@ include __DIR__ . '/hq_header.php';
                         <?php endforeach; ?>
                     </div>
 
+                    <!-- 部門タブ設定（レジ画面の表示・並び順。色は全店共通のため部門マスタ側で設定） -->
+                    <div class="tab-settings">
+                        <h5>📱 レジ画面：部門タブの表示・並び順（この店舗のみ）</h5>
+                        <table class="tab-settings-table">
+                            <thead>
+                                <tr><th style="text-align:left;">部門</th><th>非表示</th><th>表示順</th></tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($tab_cols as $c):
+                                    $hide_v  = (int)($f[$c['field_hide']]  ?? 0);
+                                    $order_v = trim((string)($f[$c['field_order']] ?? ''));
+                                ?>
+                                <tr>
+                                    <td class="label-cell"><?= htmlspecialchars($c['label']) ?></td>
+                                    <td>
+                                        <input type="checkbox" class="tab-hide-cb"
+                                               id="<?= $c['key_hide'] ?>-<?= (int)$rid ?>"
+                                               <?= $hide_v === 1 ? 'checked' : '' ?>>
+                                    </td>
+                                    <td>
+                                        <input type="number" class="tab-order-input"
+                                               id="<?= $c['key_order'] ?>-<?= (int)$rid ?>"
+                                               value="<?= htmlspecialchars($order_v) ?>"
+                                               placeholder="既定順">
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
                     <div class="ep-actions">
                         <button class="btn-save" onclick="saveStore(<?= (int)$rid ?>)">💾 保存</button>
                         <button class="btn-cancel-edit" onclick="toggleEdit(<?= (int)$rid ?>)">キャンセル</button>
@@ -363,6 +425,10 @@ function saveStore(rid) {
     <?php foreach ($ic_cols as $c): ?>
     var <?= $c['key'] ?> = document.getElementById('<?= $c['key'] ?>-' + rid)?.value ?? '';
     <?php endforeach; ?>
+    <?php foreach ($tab_cols as $c): ?>
+    var <?= $c['key_hide'] ?>  = document.getElementById('<?= $c['key_hide']  ?>-' + rid)?.checked ? '1' : '0';
+    var <?= $c['key_order'] ?> = document.getElementById('<?= $c['key_order'] ?>-' + rid)?.value ?? '';
+    <?php endforeach; ?>
 
     var fd = new FormData();
     fd.append('action',       'save');
@@ -371,6 +437,10 @@ function saveStore(rid) {
     fd.append('heiten_bi',    heiten);
     <?php foreach ($ic_cols as $c): ?>
     fd.append('<?= $c['key'] ?>', <?= $c['key'] ?>);
+    <?php endforeach; ?>
+    <?php foreach ($tab_cols as $c): ?>
+    fd.append('<?= $c['key_hide']  ?>', <?= $c['key_hide']  ?>);
+    fd.append('<?= $c['key_order'] ?>', <?= $c['key_order'] ?>);
     <?php endforeach; ?>
 
     var msgEl = document.getElementById('msg-' + rid);
