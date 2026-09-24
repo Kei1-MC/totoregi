@@ -69,6 +69,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
+    /* ── レジ表示部門（店舗別上書き）保存。空欄選択で本部既定値に戻す（my_pos はページ側から受け取る）── */
+    if ($action === 'save_bumon') {
+        $bumon  = trim($_POST['bumon'] ?? '');
+        $my_pos = (int)($_POST['my_pos'] ?? 0);
+        if ($my_pos < 1 || $my_pos > MAX_STORE_REPS) {
+            echo json_encode(['ok' => false, 'error' => 'invalid_pos']);
+            exit();
+        }
+        $key = repeatKey('店舗部門', $my_pos);
+        $res = $fm->editRecord($rid, ['fieldData' => [$key => $bumon]]);
+        $code = $res['result']['messages'][0]['code'] ?? '500';
+        echo json_encode(['ok' => ($code === '0')]);
+        exit();
+    }
+
     /* ── デバッグ: pos 2以降のデータを持つレコードを検索して生 fieldData を返す ── */
     if ($action === 'debug_record') {
         // 最大20件取得して、pos 2以降にデータがあるレコードを探す
@@ -208,18 +223,24 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
         $master_price = (int)($f['本体価格'] ?? 0);
         // 店舗本体価格が未設定（移行前・データ不整合時）は本部設定価格にフォールバック
         $honbai_price = (int)($f[repeatKey('店舗本体価格', $my_pos)] ?? 0) ?: $master_price;
+        $master_bumon = trim($f['部門'] ?? '');
+        // レジ表示部門：店舗別の上書きがあればそちらを優先、無ければ本部既定値
+        $bumon_override = trim($f[repeatKey('店舗部門', $my_pos)] ?? '');
+        $effective_bumon = $bumon_override !== '' ? $bumon_override : $master_bumon;
         $products[] = [
-            'record_id'    => $row['recordId'],
-            'name'         => $n,
-            'bumon'        => trim($f['部門']     ?? ''),
-            'yomi'         => trim($f['よみがな'] ?? ''),
-            'master_price' => $master_price, // 本部設定価格（参考表示用）
-            'price'        => $honbai_price, // 店舗本体価格（編集可能）
-            'tani'         => trim($f['販売単位'] ?? ''),
-            'hanbai_chu'   => (int)($f['発売中']  ?? 1),
-            'sale'         => (int)($f['セール']  ?? 0),
-            'sale_price'   => $sale_price,
-            'my_pos'       => $my_pos, // 価格保存・外す処理に使用
+            'record_id'      => $row['recordId'],
+            'name'           => $n,
+            'bumon'          => $effective_bumon,   // タブ分類・並び替えに使う実効値
+            'master_bumon'   => $master_bumon,      // 本部既定値（参考表示・「既定に戻す」用）
+            'bumon_override' => $bumon_override,     // 自店の上書き値（空=上書きなし）
+            'yomi'           => trim($f['よみがな'] ?? ''),
+            'master_price'   => $master_price, // 本部設定価格（参考表示用）
+            'price'          => $honbai_price, // 店舗本体価格（編集可能）
+            'tani'           => trim($f['販売単位'] ?? ''),
+            'hanbai_chu'     => (int)($f['発売中']  ?? 1),
+            'sale'           => (int)($f['セール']  ?? 0),
+            'sale_price'     => $sale_price,
+            'my_pos'         => $my_pos, // 価格保存・外す処理に使用
         ];
     } else {
         /* ── マスター（未取扱）── */
@@ -312,6 +333,20 @@ include __DIR__ . '/header.php';
 .product-price { font-size: 0.88em; color: #555; white-space: nowrap; }
 .product-row.inactive .product-price { color: #aaa; }
 
+/* レジ表示部門（店舗別上書き） */
+.bumon-override-wrap { display: flex; align-items: center; gap: 0.3em; flex-shrink: 0; }
+.bumon-override-wrap label { font-size: 0.72em; color: #888; white-space: nowrap; }
+.bumon-select {
+    border: 1.5px solid #c8d8c8; border-radius: 0.35em;
+    padding: 0.2em 0.3em; font-size: 0.82em; color: #333; max-width: 8em;
+}
+.bumon-select.saved { border-color: #00897b; }
+.bumon-badge-override {
+    display: inline-block; background: #fff3e0; color: #e65100;
+    font-size: 0.68em; font-weight: bold; padding: 1px 6px; border-radius: 0.3em;
+    white-space: nowrap; flex-shrink: 0;
+}
+
 /* セール価格 */
 .sale-price-wrap { display: flex; align-items: center; gap: 0.3em; flex-shrink: 0; }
 .sale-price-wrap label { font-size: 0.72em; color: #888; white-space: nowrap; }
@@ -398,10 +433,26 @@ include __DIR__ . '/header.php';
 
           <!-- 商品情報 -->
           <div class="product-info">
-            <span class="bumon-badge"><?= htmlspecialchars($p['bumon']) ?></span>
             <span class="product-name"><?= htmlspecialchars($p['name']) ?></span>
             <?php if ($p['sale']): ?><span class="sale-badge">セール</span><?php endif; ?>
             <?php if ($p['tani']): ?><span class="product-tani"><?= htmlspecialchars($p['tani']) ?></span><?php endif; ?>
+          </div>
+
+          <!-- レジ表示部門（店舗別に上書き可能。空欄選択で本部既定に戻る） -->
+          <div class="bumon-override-wrap">
+            <label>部門</label>
+            <select class="bumon-select"
+                    data-rid="<?= $p['record_id'] ?>"
+                    data-my-pos="<?= $p['my_pos'] ?>"
+                    title="本部既定: <?= htmlspecialchars($p['master_bumon']) ?>">
+              <option value="">-- 本部既定（<?= htmlspecialchars($p['master_bumon']) ?>）--</option>
+              <?php foreach ($bumon_master as $b): ?>
+                <option value="<?= htmlspecialchars($b, ENT_QUOTES) ?>" <?= $p['bumon_override'] === $b ? 'selected' : '' ?>><?= htmlspecialchars($b) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <?php if ($p['bumon_override'] !== ''): ?>
+              <span class="bumon-badge-override" title="この店舗だけの上書き設定">上書き中</span>
+            <?php endif; ?>
           </div>
 
           <!-- 本部設定価格（参考） -->
@@ -552,6 +603,27 @@ function saveHonbaiPrice() {
         }
     });
 }
+
+/* ── レジ表示部門（店舗別上書き）保存。部門はタブ分け・件数表示にも影響するため保存後に再読込 ── */
+document.querySelectorAll('.bumon-select').forEach(function(sel) {
+    sel.addEventListener('change', function() {
+        var el    = this;
+        var rid   = el.dataset.rid;
+        var myPos = el.dataset.myPos;
+        var val   = el.value;
+        el.disabled = true;
+        fetch('shohin_maint.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=save_bumon&record_id=' + encodeURIComponent(rid)
+                + '&my_pos=' + encodeURIComponent(myPos)
+                + '&bumon=' + encodeURIComponent(val)
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) { location.reload(); }
+            else { alert('部門の保存に失敗しました。'); el.disabled = false; }
+        }).catch(function() { alert('通信エラーが発生しました。'); el.disabled = false; });
+    });
+});
 
 /* ── 部門タブ ── */
 document.querySelectorAll('.dept-tab').forEach(function(tab) {

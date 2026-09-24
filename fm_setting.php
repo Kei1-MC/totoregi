@@ -81,6 +81,14 @@ function getStoreSalePrice(array $f, string $storeId): int {
     return (int)($f[repeatKey('セール価格', $pos)] ?? 0);
 }
 
+/** 特定店舗のレジ表示部門の上書き値（空文字=未設定＝本部設定の「部門」を使う）を取得 */
+function getStoreBumon(array $f, string $storeId): string {
+    $positions = getStorePositions($f);
+    $pos = array_search($storeId, $positions);
+    if ($pos === false) return '';
+    return trim((string)($f[repeatKey('店舗部門', $pos)] ?? ''));
+}
+
 /** 特定店舗の本体価格（店舗別。0=未設定＝本部設定の本体価格を使う）を取得 */
 function getStoreHonbaiPrice(array $f, string $storeId): int {
     $positions = getStorePositions($f);

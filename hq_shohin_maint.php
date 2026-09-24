@@ -14,9 +14,16 @@ require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 require_once __DIR__ . '/bumon_master.php';
 
-// 部門定義（bumon_API から取得。並び順昇順）
+// 部門定義（bumon_API から取得。並び順昇順。レジ表示用・「惣菜」「レジ袋」等の簡易分類も含む）
 $bumon_master = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
 $bumon_list   = bumon_names($bumon_master);
+
+// 分析部門の選択肢（売上日報の20部門。daily_report_entry.phpの$all_bushoと同じ構成）
+// 「惣菜」のような簡易分類ではなく、日報の集計に使う正確な部門のみを選ばせる
+$analysis_bumon_list = [
+    '天ぷら','魚','唐揚','冷惣菜','催事','イカ焼','エキタカ','くじら','コンビニデリカ',
+    'セルフ唐揚','セルフ天丼','セルフ惣菜','フライ','串揚','丼','個食','弁当','弁当Ⅱ','生串揚','鯛',
+];
 
 /* =====================================================================
    AJAX ハンドラー（POST）
@@ -54,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fields = [
             '商品名'   => trim($_POST['name']  ?? ''),
             '部門'     => trim($_POST['bumon'] ?? ''),
+            '分析部門' => trim($_POST['analysis_bumon'] ?? ''),
             'よみがな' => trim($_POST['yomi']  ?? ''),
             '本体価格' => (int)($_POST['price'] ?? 0),
             '販売単位' => trim($_POST['tani']  ?? ''),
@@ -133,10 +141,11 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
     $store_names = array_map(fn($id) => $stores[$id] ?? $id, $store_ids);
 
     $products[] = [
-        'record_id'     => $row['recordId'],
-        'name'          => $n,
-        'bumon'         => trim($f['部門']     ?? ''),
-        'yomi'          => trim($f['よみがな'] ?? ''),
+        'record_id'      => $row['recordId'],
+        'name'           => $n,
+        'bumon'          => trim($f['部門']     ?? ''),
+        'analysis_bumon' => trim($f['分析部門'] ?? ''),
+        'yomi'           => trim($f['よみがな'] ?? ''),
         'price'         => (int)($f['本体価格'] ?? 0),
         'tani'          => trim($f['販売単位'] ?? ''),
         'hanbai_chu'    => (int)($f['発売中']  ?? 1),
@@ -236,6 +245,7 @@ include __DIR__ . '/hq_header.php';
 
 /* ── バッジ ── */
 .bumon-badge { display: inline-block; background: #e8eaf6; color: #1a237e; font-size: 0.72em; padding: 1px 7px; border-radius: 1em; font-weight: bold; }
+.bumon-badge-warn { display: inline-block; background: #fff3e0; color: #e65100; font-size: 0.72em; padding: 1px 7px; border-radius: 1em; font-weight: bold; }
 .sale-badge  { display: inline-block; background: #c62828; color: #fff; font-size: 0.68em; font-weight: bold; padding: 1px 6px; border-radius: 0.3em; }
 .store-badge {
     display: inline-block; background: #e8eaf6; color: #3949ab;
@@ -408,6 +418,7 @@ include __DIR__ . '/hq_header.php';
           <th>セール</th>
           <th>商品名</th>
           <th>部門</th>
+          <th>分析部門</th>
           <th>価格</th>
           <th>単位</th>
           <th>取扱店舗</th>
@@ -452,6 +463,15 @@ include __DIR__ . '/hq_header.php';
 
             <!-- 部門 -->
             <td><span class="bumon-badge"><?= htmlspecialchars($p['bumon']) ?></span></td>
+
+            <!-- 分析部門（未設定は要対応として強調） -->
+            <td>
+              <?php if ($p['analysis_bumon'] !== ''): ?>
+                <span class="bumon-badge"><?= htmlspecialchars($p['analysis_bumon']) ?></span>
+              <?php else: ?>
+                <span class="bumon-badge-warn">未設定</span>
+              <?php endif; ?>
+            </td>
 
             <!-- 価格 -->
             <td class="price-cell">¥<?= number_format($p['price']) ?></td>
@@ -513,7 +533,7 @@ include __DIR__ . '/hq_header.php';
         <!-- 部門・単位 -->
         <div class="form-row">
           <div class="form-group">
-            <label>部門 <span class="required">*</span></label>
+            <label>部門（レジ表示用） <span class="required">*</span></label>
             <select id="f-bumon" name="bumon" required>
               <option value="">-- 選択 --</option>
               <?php foreach ($bumon_list as $b): ?>
@@ -525,6 +545,17 @@ include __DIR__ . '/hq_header.php';
             <label>販売単位</label>
             <input type="text" id="f-tani" name="tani" placeholder="例: 枚, 匹" maxlength="10">
           </div>
+        </div>
+
+        <!-- 分析部門（売上分析・日報自動集計用） -->
+        <div class="form-group">
+          <label>分析部門（売上日報の自動集計用）</label>
+          <select id="f-analysis-bumon" name="analysis_bumon">
+            <option value="">-- 未設定 --</option>
+            <?php foreach ($analysis_bumon_list as $b): ?>
+              <option value="<?= htmlspecialchars($b, ENT_QUOTES) ?>"><?= htmlspecialchars($b) ?></option>
+            <?php endforeach; ?>
+          </select>
         </div>
 
         <!-- よみがな -->
@@ -700,6 +731,7 @@ function openModal(data) {
         document.getElementById('f-record-id').value            = data.record_id;
         document.getElementById('f-name').value                 = data.name;
         document.getElementById('f-bumon').value                = data.bumon;
+        document.getElementById('f-analysis-bumon').value       = data.analysis_bumon || '';
         document.getElementById('f-yomi').value                 = data.yomi;
         document.getElementById('f-price').value                = data.price;
         document.getElementById('f-tani').value                 = data.tani;
@@ -745,6 +777,7 @@ function saveProduct(e) {
         record_id           : document.getElementById('f-record-id').value,
         name                : document.getElementById('f-name').value,
         bumon               : document.getElementById('f-bumon').value,
+        analysis_bumon      : document.getElementById('f-analysis-bumon').value,
         yomi                : document.getElementById('f-yomi').value,
         price               : document.getElementById('f-price').value,
         tani                : document.getElementById('f-tani').value,

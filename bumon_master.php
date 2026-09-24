@@ -10,7 +10,7 @@
 
 /**
  * 部門マスタ一覧を取得（並び順の昇順）
- * @return array  [ ['cd'=>int, 'name'=>string, 'order'=>int], ... ]
+ * @return array  [ ['cd'=>int, 'name'=>string, 'order'=>int, 'color'=>string], ... ]
  */
 function fetch_bumon_master(string $host, string $db, string $layout_bumon,
                              string $api_master_user, string $api_master_pass): array {
@@ -33,6 +33,7 @@ function fetch_bumon_master(string $host, string $db, string $layout_bumon,
             'cd'    => (int)($f['部門CD'] ?? 0),
             'name'  => $name,
             'order' => (int)($f['並び順'] ?? 0),
+            'color' => trim((string)($f['表示色'] ?? '')),
         ];
     }
     usort($list, fn($a, $b) => $a['order'] <=> $b['order']);

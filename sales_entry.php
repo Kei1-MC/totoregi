@@ -87,6 +87,44 @@ if (empty($ic_dept_fm) && !empty($_ic_static_dept)) {
     $ic_dept = $ic_dept_fm;   // FM 設定を優先
 }
 
+// =====================================================================
+// 部門タブの店舗別カスタマイズ（表示/非表示・表示順）と部門色（共通）
+// =====================================================================
+
+/** 店舗の部門タブ設定（非表示_<部門名> / 表示順_<部門名>）を account_API から取得 */
+function _fetch_bumon_tab_settings(string $store_id, string $host, string $db,
+                                    string $layout_account,
+                                    string $api_master_user, string $api_master_pass,
+                                    array $bumon_names): array {
+    try {
+        $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
+                                      $api_master_user, $api_master_pass,
+                                      ['allowInsecure' => true]);
+        $res = $fm->findRecords(['query' => [['店舗Ｎｏ' => $store_id]]]);
+        $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
+        $hidden = []; $order = [];
+        foreach ($bumon_names as $b) {
+            if ((int)($fd['非表示_' . $b] ?? 0) === 1) $hidden[$b] = true;
+            $o = trim((string)($fd['表示順_' . $b] ?? ''));
+            if ($o !== '') $order[$b] = (int)$o;
+        }
+        return ['hidden' => $hidden, 'order' => $order];
+    } catch (\Throwable $e) {
+        return ['hidden' => [], 'order' => []];
+    }
+}
+$bumon_tab = _fetch_bumon_tab_settings(
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass,
+    bumon_names($bumon_master)
+);
+
+// 部門色（bumon_API.表示色。店舗共通）
+$bumon_colors = [];
+foreach ($bumon_master as $b) {
+    $c = trim((string)($b['color'] ?? ''));
+    if ($c !== '') $bumon_colors[$b['name']] = $c;
+}
+
 $nebiki_ritsu_master = [10, 20, 30, 50];
 $nebiki_gaku_master  = [50, 100, 200, 300];
 
@@ -133,11 +171,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $neb_gaku   = (int)($item['nebiki_gaku']  ?? 0);
                 $neb_ritsu  = (float)($item['nebiki_ritsu'] ?? 0);
                 $hanbai_kin = ($honbai - $neb_gaku) * $suryo;
+                // 部門は分析部門（売上分析用）を優先。未設定の商品は暫定的にレジ表示部門を使う
+                $bumon_for_pos = trim($item['analysisBumon'] ?? '') ?: ($item['bumon'] ?? '');
                 $result = $fmPos->createRecord(['fieldData' => [
                     '販売日時'   => $today,
                     '店舗No'    => $store_id,
                     '商品名'    => $item['name']  ?? '',
-                    '部門'      => $item['bumon'] ?? '',
+                    '部門'      => $bumon_for_pos,
                     '販売単位'  => $item['tani']  ?? '',
                     '本体価格'  => $honbai,
                     '数量'      => $suryo,
@@ -208,10 +248,12 @@ foreach ($res2['result']['response']['data'] ?? [] as $row) {
     $positions = getStorePositions($f);
     if (!in_array($store_id, $positions, true)) continue;
 
-    $b = trim($f['部門']     ?? '');
+    // レジ表示部門：店舗別の上書きがあればそちらを優先、無ければ本部設定の「部門」
+    $store_bumon = getStoreBumon($f, $store_id);
+    $b = $store_bumon !== '' ? $store_bumon : trim($f['部門'] ?? '');
     $y = trim($f['よみがな'] ?? '');
 
-    // 部門名をカテゴリーにマッピング
+    // 部門名をカテゴリーにマッピング（表記ゆれの正規化のみ）
     $cat = $category_map[$b] ?? $b;
 
     // 本体価格：店舗別に設定されていればそれを使用、なければ本部設定の本体価格
@@ -222,40 +264,41 @@ foreach ($res2['result']['response']['data'] ?? [] as $row) {
     $disp_price = ($sale_price > 0) ? $sale_price : $base_price;
 
     $products[] = [
-        'bumon'      => $cat,
-        'bumon_orig' => $b,
-        'name'       => $n,
-        'yomi'       => $y,
-        'tani'       => trim($f['販売単位'] ?? ''),
-        'price'      => $disp_price,
-        'sale'       => (int)($f['セール']  ?? 0),
+        'bumon'          => $cat,
+        'bumon_orig'     => $b,
+        // 分析部門：売上分析・日報自動集計用。店舗のレジ表示部門の上書きに関わらず常に共通の値
+        'analysis_bumon' => trim($f['分析部門'] ?? ''),
+        'name'           => $n,
+        'yomi'           => $y,
+        'tani'           => trim($f['販売単位'] ?? ''),
+        'price'          => $disp_price,
+        'sale'           => (int)($f['セール']  ?? 0),
     ];
 }
 
-// カテゴリー順 → よみがな順でソート
+// カテゴリー順 → よみがな順でソート（店舗の表示順カスタマイズがあれば優先）
 $cat_pos = array_flip($category_order);
-usort($products, function($a, $b) use ($cat_pos) {
-    $pa = $cat_pos[$a['bumon']] ?? 999;
-    $pb = $cat_pos[$b['bumon']] ?? 999;
+$effective_cat_pos = function(string $cat) use ($cat_pos, $bumon_tab): int {
+    return $bumon_tab['order'][$cat] ?? ($cat_pos[$cat] ?? 999);
+};
+usort($products, function($a, $b) use ($effective_cat_pos) {
+    $pa = $effective_cat_pos($a['bumon']);
+    $pb = $effective_cat_pos($b['bumon']);
     if ($pa !== $pb) return $pa - $pb;
     return strcmp($a['yomi'], $b['yomi']);
 });
 
-// 表示カテゴリーリスト（定義順を維持、存在するもののみ）
+// 表示カテゴリーリスト（定義順を維持、存在するもののみ。店舗が非表示にした部門は除外）
 $active_cats = [];
 foreach ($products as $p) {
-    if ($p['bumon'] !== '' && !in_array($p['bumon'], $active_cats, true)) {
+    if ($p['bumon'] !== '' && !in_array($p['bumon'], $active_cats, true)
+        && empty($bumon_tab['hidden'][$p['bumon']])) {
         $active_cats[] = $p['bumon'];
     }
 }
-// $category_order の順に並べ直し、未定義カテゴリーは末尾に追加
-$bumon_list = [];
-foreach ($category_order as $c) {
-    if (in_array($c, $active_cats, true)) $bumon_list[] = $c;
-}
-foreach ($active_cats as $c) {
-    if (!in_array($c, $bumon_list, true)) $bumon_list[] = $c;
-}
+// 店舗の表示順カスタマイズ→$category_order の順に並べ直し、未定義カテゴリーは末尾に追加
+usort($active_cats, fn($a, $b) => $effective_cat_pos($a) <=> $effective_cat_pos($b));
+$bumon_list = $active_cats;
 
 include __DIR__ . '/header.php';
 // header.phpの <div class="container mt-4"> を閉じ、余白をリセット
@@ -304,14 +347,6 @@ body { overflow: hidden; margin: 0; padding: 0; }
     white-space: nowrap;
 }
 .bumon-btn.active { background: #004d40; color: #fff; }
-.bumon-btn[data-bumon="魚"]            { border-color: #1565c0; color: #1565c0; }
-.bumon-btn[data-bumon="魚"].active     { background: #1565c0; color: #fff; border-color: #1565c0; }
-.bumon-btn[data-bumon="天ぷら"]         { border-color: #f9a825; color: #f57f17; }
-.bumon-btn[data-bumon="天ぷら"].active  { background: #f9a825; color: #fff; border-color: #f9a825; }
-.bumon-btn[data-bumon="惣菜"]          { border-color: #2e7d32; color: #2e7d32; }
-.bumon-btn[data-bumon="惣菜"].active   { background: #2e7d32; color: #fff; border-color: #2e7d32; }
-.bumon-btn[data-bumon="唐揚"]          { border-color: #c62828; color: #c62828; }
-.bumon-btn[data-bumon="唐揚"].active   { background: #c62828; color: #fff; border-color: #c62828; }
 
 /* === 商品グリッド === */
 .pos-shohin {
@@ -356,11 +391,7 @@ body { overflow: hidden; margin: 0; padding: 0; }
 }
 .shohin-item .s-tani { display: none !important; }
 .shohin-item .s-sub  { display: none !important; }
-/* カテゴリー別カラー */
-.shohin-item[data-bumon="魚"]    { background: #e3f2fd; border-color: #90caf9; }
-.shohin-item[data-bumon="天ぷら"] { background: #fff8e1; border-color: #ffe082; }
-.shohin-item[data-bumon="惣菜"]   { background: #e8f5e9; border-color: #a5d6a7; }
-.shohin-item[data-bumon="唐揚"]   { background: #fce4ec; border-color: #f48fb1; }
+/* カテゴリー別カラーは bumon_API.表示色 から動的生成（下記 <?php ?> ブロック参照） */
 
 /* === カートエリア（画面下部固定） === */
 .pos-cart {
@@ -648,10 +679,7 @@ body { overflow: hidden; margin: 0; padding: 0; }
     border-radius: 0.3em; margin-bottom: 0.3em;
     display: inline-block;
 }
-.rcpt-bumon-title[data-bumon="魚"]    { background: #1565c0; }
-.rcpt-bumon-title[data-bumon="天ぷら"] { background: #f9a825; color: #333; }
-.rcpt-bumon-title[data-bumon="惣菜"]   { background: #2e7d32; }
-.rcpt-bumon-title[data-bumon="唐揚"]   { background: #c62828; }
+/* rcpt-bumon-title の部門別背景色も下記 <?php ?> ブロックで動的生成 */
 
 .rcpt-items {
     width: 100%;
@@ -857,6 +885,30 @@ body { overflow: hidden; margin: 0; padding: 0; }
     .rcpt-bumon-code svg { max-width: 58mm; }
     .rcpt-grand-total .amount { font-size: 1.3em; }
 }
+
+/* 部門別カラー（bumon_API.表示色から動的生成） */
+<?php
+function _hex_mix_white(string $hex, float $ratio): string {
+    $hex = ltrim($hex, '#');
+    if (!preg_match('/^[0-9a-fA-F]{6}$/', $hex)) return '#ffffff';
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+    $r = (int)round($r + (255 - $r) * $ratio);
+    $g = (int)round($g + (255 - $g) * $ratio);
+    $b = (int)round($b + (255 - $b) * $ratio);
+    return sprintf('#%02x%02x%02x', $r, $g, $b);
+}
+foreach ($bumon_colors as $bname => $color):
+    $sel = '[data-bumon="' . addslashes($bname) . '"]';
+    $bg_light  = _hex_mix_white($color, 0.90); // 商品ボタンの淡い背景
+    $bd_light  = _hex_mix_white($color, 0.55); // 商品ボタンの枠線
+?>
+.bumon-btn<?= $sel ?>            { border-color: <?= $color ?>; color: <?= $color ?>; }
+.bumon-btn<?= $sel ?>.active     { background: <?= $color ?>; color: #fff; border-color: <?= $color ?>; }
+.shohin-item<?= $sel ?>          { background: <?= $bg_light ?>; border-color: <?= $bd_light ?>; }
+.rcpt-bumon-title<?= $sel ?>     { background: <?= $color ?>; }
+<?php endforeach; ?>
 </style>
 
 <!-- JsBarcode CDN -->
@@ -899,6 +951,7 @@ body { overflow: hidden; margin: 0; padding: 0; }
     <?php foreach ($products as $p): ?>
       <button class="shohin-item"
               data-bumon="<?= htmlspecialchars($p['bumon'], ENT_QUOTES) ?>"
+              data-analysis-bumon="<?= htmlspecialchars($p['analysis_bumon'], ENT_QUOTES) ?>"
               data-name="<?= htmlspecialchars($p['name'],  ENT_QUOTES) ?>"
               data-tani="<?= htmlspecialchars($p['tani'],  ENT_QUOTES) ?>"
               data-price="<?= $p['price'] ?>">
@@ -1003,6 +1056,7 @@ $('shohin-list').addEventListener('click', function(e) {
 
     const name  = btn.dataset.name;
     const bumon = btn.dataset.bumon;
+    const analysisBumon = btn.dataset.analysisBumon;
     const tani  = btn.dataset.tani;
     const price = parseInt(btn.dataset.price, 10);
 
@@ -1013,7 +1067,7 @@ $('shohin-list').addEventListener('click', function(e) {
         recalcItem(exist);
     } else {
         const item = {
-            name, bumon, tani, price,
+            name, bumon, analysisBumon, tani, price,
             qty: 1,
             nebikiIdx: 0,        // nebikiOptions の index
             nebiki_gaku: 0,
