@@ -160,6 +160,11 @@ $tr_all = totoregiAgg($pos_records, null, $all_busho);
 if ($is_reflect_ajax) {
     header('Content-Type: application/json');
     $slot_key = $_GET['slot'] ?? '';
+    if ($slot_key === 'heiten') {
+        // 閉店後＝カットオフなし（1日全体）。部門別内訳も返す（閉店後は部門別入力のため）
+        echo json_encode(['ok' => true, 'kyaku' => $tr_all['count'], 'sum' => $tr_all['sum'], 'busho' => $tr_all['by_field']]);
+        exit();
+    }
     if (!isset($time_slots[$slot_key])) {
         echo json_encode(['ok' => false, 'error' => 'invalid_slot']);
         exit();
@@ -626,6 +631,16 @@ include __DIR__ . '/header.php';
     cursor: pointer; transition: background .15s;
 }
 .reflect-btn:hover { background: #e3f2fd; }
+
+/* 百貨店レジ分 追加ボタン（閉店後・部門別） */
+.hyakkaten-add-btn {
+    flex-shrink: 0;
+    padding: 0.3em 0.45em;
+    background: #fff3e0; color: #e65100;
+    border: 1px solid #ffb74d; border-radius: 0.4em;
+    font-size: 0.85em; font-weight: bold; cursor: pointer;
+}
+.hyakkaten-add-btn:hover { background: #ffe0b2; }
 .reflect-btn:disabled { background: #eee; color: #999; border-color: #ccc; cursor: default; }
 
 /* アコーディオン（部門設定） */
@@ -712,6 +727,30 @@ include __DIR__ . '/header.php';
 }
 .rank-row.rank-me .rank-num { color: #004d40; }
 .rank-row.rank-me .rank-name { color: #004d40; }
+
+/* 部門別内訳（レジ実績・参考表示のみ） */
+.bumon-ref-wrap { margin-top: 0.6em; }
+.bumon-ref-toggle {
+    font-size: 0.8em; color: #00695c; font-weight: bold;
+    cursor: pointer; user-select: none;
+}
+.bumon-ref-toggle .accord-arrow { display: inline-block; transition: transform .2s; }
+.bumon-ref-toggle.open .accord-arrow { transform: rotate(180deg); }
+.bumon-ref-body {
+    display: none;
+    margin-top: 0.4em;
+    padding: 0.5em 0.7em;
+    background: #f7faf9;
+    border: 1px solid #d8e8e4;
+    border-radius: 0.5em;
+}
+.bumon-ref-body.open { display: block; }
+.bumon-ref-row {
+    display: flex; justify-content: space-between;
+    font-size: 0.82em; color: #444;
+    padding: 0.15em 0;
+}
+.bumon-ref-row span:last-child { font-weight: bold; color: #2e7d32; }
 
 /* 確定バナー */
 .kakutei-banner {
@@ -1001,18 +1040,19 @@ include __DIR__ . '/header.php';
       <span>ととレジ</span>
       <span>前年同曜日</span>
   </div>';
-  // 部門別行のヘッダー（ととレジ列は部門別実績が無いため空欄。閉店後で使用）
+  // 部門別行のヘッダー（閉店後で使用。ととレジ列は分析部門からの自動集計を表示）
   $cmp_header_bumon = '<div class="cmp-header">
       <span></span>
       <span class="h-input">本　年</span>
-      <span></span>
+      <span>ととレジ</span>
       <span>前年同曜日</span>
   </div>';
 
-  // 時間帯セクション出力関数（客数・累計売上とも時間帯合計のみ入力。部門別入力は閉店後のみ）
+  // 時間帯セクション出力関数（客数・累計売上とも時間帯合計のみ入力。部門別入力は閉店後のみ。
+  // 部門別内訳はレジ実績（分析部門）からの自動集計を参考表示するのみで、入力・保存はしない）
   function timeSec(string $suffix, array $slot,
                    array $fd, array $py_fd, bool $is_kakutei,
-                   string $cmp_header, array $tr): void {
+                   string $cmp_header, array $tr, array $all_busho): void {
       $label        = $slot['label'];
       $action       = $slot['action'];
       $field_kyaku  = $slot['field_kyaku'];
@@ -1048,6 +1088,20 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-py">' . ($py_uriage_val > 0 ? '<span class="py-val">¥' . number_format($py_uriage_val) . '</span>' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
+      // 部門別内訳（レジの分析部門から自動集計した参考値。入力・保存はしない）
+      $busho_breakdown = array_filter($tr['by_field'] ?? [], fn($v) => $v > 0);
+      if (!empty($busho_breakdown)) {
+          echo '<div class="bumon-ref-wrap">';
+          echo '<div class="bumon-ref-toggle" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\')">';
+          echo '<span class="accord-arrow">▼</span> 部門別内訳を見る（レジ実績・参考）</div>';
+          echo '<div class="bumon-ref-body">';
+          foreach ($all_busho as $bf => $blabel) {
+              if (empty($busho_breakdown[$bf])) continue;
+              echo '<div class="bumon-ref-row"><span>' . $blabel . '</span><span>¥' . number_format($busho_breakdown[$bf]) . '</span></div>';
+          }
+          echo '</div></div>';
+      }
+
       if (!$is_kakutei) {
           $plain_label = preg_replace('/[🕛🕒🕔]\s*/', '', $label);
           echo '<button type="button" class="reflect-btn" onclick="reflectRegi(\'' . $suffix . '\', this)">🧾 レジの実績を反映</button>';
@@ -1060,7 +1114,7 @@ include __DIR__ . '/header.php';
 
   <?php foreach ($time_slots as $suffix => $slot): ?>
     <?php timeSec($suffix, $slot, $fd, $py_fd, $is_kakutei || $is_future_page,
-        $cmp_header, ${'tr_' . $suffix}); ?>
+        $cmp_header, ${'tr_' . $suffix}, $all_busho); ?>
   <?php endforeach; ?>
 
   <!-- 閉店後 -->
@@ -1106,18 +1160,23 @@ include __DIR__ . '/header.php';
       <form method="post" id="form-heiten">
         <input type="hidden" name="action" id="heiten-action" value="save_heiten">
 
-        <!-- 部門一覧（部門別のととレジ実績は対象外のため列は空欄） -->
+        <!-- 部門一覧（ととレジ列は分析部門からの自動集計。百貨店レジ分は🏬ボタンで追加入力） -->
         <?= $cmp_header_bumon ?>
         <?php foreach ($all_busho as $field => $label): ?>
-        <?php $pyv = (int)($py_fd[$field] ?? 0); ?>
+        <?php $pyv = (int)($py_fd[$field] ?? 0); $tr_v = (int)($tr_all['by_field'][$field] ?? 0); ?>
         <div class="cmp-grid busho-cmp" data-field="<?= $field ?>">
           <span class="cmp-label"><?= $label ?></span>
-          <div>
-            <input class="cmp-input busho-input" type="text" inputmode="numeric" name="<?= $field ?>"
+          <div style="display:flex; align-items:center; gap:0.3em;">
+            <input class="cmp-input busho-input" id="busho-input-<?= $field ?>" type="text" inputmode="numeric" name="<?= $field ?>"
                    value="<?= fv($fd, $field) ?>"
                    <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?>>
             <span class="cmp-unit">円</span>
+            <?php if (!$is_kakutei && !$is_future_page): ?>
+              <button type="button" class="hyakkaten-add-btn" title="百貨店レジ分を追加"
+                      onclick="addHyakkaten('busho-input-<?= $field ?>', '<?= htmlspecialchars($label, ENT_QUOTES) ?>')">🏬+</button>
+            <?php endif; ?>
           </div>
+          <div class="cmp-tr"><?= $tr_v > 0 ? '<span class="tr-val">¥' . number_format($tr_v) . '</span>' : '<span class="tr-none">―</span>' ?></div>
           <div class="cmp-py">
             <?= $pyv > 0 ? '<span class="py-val">¥' . number_format($pyv) . '</span>' : '<span class="py-none">―</span>' ?>
           </div>
@@ -1143,7 +1202,7 @@ include __DIR__ . '/header.php';
           <div class="cmp-grid">
             <span class="cmp-label">客数合計</span>
             <div>
-              <input class="cmp-input" type="text" inputmode="numeric" name="客数_閉店後"
+              <input class="cmp-input" id="kyaku-input-heiten" type="text" inputmode="numeric" name="客数_閉店後"
                      value="<?= fv($fd, '客数_閉店後') ?>"
                      <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?>>
               <span class="cmp-unit">人</span>
@@ -1157,6 +1216,7 @@ include __DIR__ . '/header.php';
 
         <!-- 保存・確定ボタン -->
         <?php if (!$is_kakutei && !$is_future_page): ?>
+          <button type="button" class="reflect-btn" onclick="reflectRegi('heiten', this)">🧾 レジの実績を反映</button>
           <button type="button" class="save-btn"
                   onclick="submitHeiten('save_heiten')">💾 閉店後データを保存</button>
           <button type="button" class="save-btn kakutei"
@@ -1214,12 +1274,42 @@ async function reflectRegi(suffix, btn) {
         if (kyakuInput && !kyakuInput.disabled) kyakuInput.value = formatComma(data.kyaku);
         const uriageInput = document.getElementById('uriage-input-' + suffix);
         if (uriageInput && !uriageInput.disabled) uriageInput.value = formatComma(data.sum);
+
+        // 閉店後：部門別に自動反映（分析部門からの集計）。反映後も百貨店レジ分を🏬+で追加できる
+        if (data.busho) {
+            Object.keys(data.busho).forEach(function(field) {
+                const input = document.getElementById('busho-input-' + field);
+                if (input && !input.disabled) {
+                    const v = data.busho[field] || 0;
+                    input.value = v > 0 ? formatComma(v) : '';
+                    if (v > 0 && !BUSHO_HAS_DATA.includes(field)) BUSHO_HAS_DATA.push(field);
+                }
+            });
+            const saved = localStorage.getItem(BUMON_KEY);
+            applyBumonSetting(saved ? JSON.parse(saved) : []);
+            calcGoukeiFor('busho-input', 'busho-goukei');
+        }
     } catch (err) {
         alert('通信エラー: ' + err.message);
     } finally {
         btn.disabled = false;
         btn.textContent = origText;
     }
+}
+
+// ---- 閉店後：百貨店レジ分を部門別に追加入力 ----
+// ととレジの実績（反映ボタン）に、百貨店レジで処理した分を上乗せするための簡易入力。
+// 別欄で恒久的に保持するのではなく、その場で入力欄に加算するだけ（保存されるのは合計後の値のみ）。
+function addHyakkaten(inputId, label) {
+    const input = document.getElementById(inputId);
+    if (!input || input.disabled) return;
+    const raw = prompt('「' + label + '」の百貨店レジ分の売上を入力してください（現在の入力値に加算されます）', '');
+    if (raw === null || raw.trim() === '') return;
+    const add = parseInt(digitsOnly(raw), 10);
+    if (!add || add <= 0) { alert('数値を入力してください。'); return; }
+    const current = parseInt(digitsOnly(input.value) || '0', 10);
+    input.value = formatComma(current + add);
+    calcGoukeiFor('busho-input', 'busho-goukei');
 }
 
 // ---- アコーディオン ----
