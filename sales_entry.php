@@ -119,7 +119,15 @@ $bumon_tab = _fetch_bumon_tab_settings(
 );
 
 // 部門色（bumon_API.表示色。店舗共通）
-$bumon_colors = [];
+// 表示色が未設定の部門は、以前からの4色（魚・天ぷら・惣菜・唐揚）をフォールバックとして使う
+// （bumon_API.表示色への色コード入力が完了するまで、色が消えてしまわないようにするため）
+$bumon_color_fallback = [
+    '魚'   => '#1565c0',
+    '天ぷら' => '#f9a825',
+    '惣菜' => '#2e7d32',
+    '唐揚' => '#c62828',
+];
+$bumon_colors = $bumon_color_fallback;
 foreach ($bumon_master as $b) {
     $c = trim((string)($b['color'] ?? ''));
     if ($c !== '') $bumon_colors[$b['name']] = $c;
