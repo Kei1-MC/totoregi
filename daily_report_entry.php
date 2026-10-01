@@ -442,7 +442,7 @@ function totoregiAgg(array $pos_records, ?string $cutoff_hm, array $all_busho = 
     return ['count' => count($receipts), 'sum' => $sum, 'by_field' => $by_field];
 }
 function trCount(array $tr): string {
-    return $tr['count'] > 0 ? '<span class="tr-val">' . number_format($tr['count']) . '</span>件' : '<span class="tr-none">―</span>';
+    return $tr['count'] > 0 ? '<span class="tr-val">' . number_format($tr['count']) . '</span>人' : '<span class="tr-none">―</span>';
 }
 function trSum(array $tr): string {
     return $tr['sum'] > 0 ? '<span class="tr-val">¥' . number_format($tr['sum']) . '</span>' : '<span class="tr-none">―</span>';
@@ -1027,7 +1027,7 @@ include __DIR__ . '/header.php';
     <div class="spec-note-title">ℹ ととレジ実績（緑色の列）について</div>
     <ul>
       <li>ととレジで登録された実際の売上を、その時刻までの分だけ自動集計して表示しています（参照のみ・保存はされません）。</li>
-      <li>客数はレシート枚数（会計回数）です。</li>
+      <li>客数はレシート枚数（会計回数）を客数として表示しています。</li>
       <li>本日分は表示のたびにリアルタイムで再集計されます。</li>
     </ul>
   </div>
