@@ -78,7 +78,8 @@ foreach ($prev_data as $pf) {
     if (!$pdate) continue;
     $day_key  = (int)date('j', $pdate);
     $week_key = date('W', $pdate) . '_' . date('N', $pdate);
-    if (!isset($prev_by_day[$day_key]))   $prev_by_day[$day_key]   = $pf;
+    // 同日比較は前年の同月のみ対象（同週同曜日用の前後7日分が日番号で衝突しないように）
+    if ((int)date('n', $pdate) === $month && !isset($prev_by_day[$day_key])) $prev_by_day[$day_key] = $pf;
     if (!isset($prev_by_week[$week_key])) $prev_by_week[$week_key] = $pf;
 }
 

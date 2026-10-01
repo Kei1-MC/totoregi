@@ -172,7 +172,8 @@ for ($d = 1; $d <= 31; $d++) {
                 : (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
         $ca += $cy_v;
         $pa += $py_v;
-        if (!is_new_store($name, $new_store_names)) {
+        // 既存店計 = 新規店・店舗マスタで「閉店」設定の店舗を除外
+        if (!is_new_store($name, $new_store_names) && !isset($closed_stores[$sno])) {
             $ck += $cy_v;
             $pk += $py_v;
         }
@@ -763,7 +764,7 @@ table.main-tbl tbody td         { background:inherit; }
   </div><!-- /tbl-wrap -->
 
   <p style="font-size:.78em;color:#888;padding:.5em 1em;">
-    ★：新規店（<?= implode('・', $new_store_names) ?>）は既存店計から除外。
+    ★：新規店（<?= implode('・', $new_store_names) ?>）、および店舗マスタで「閉店」設定の店舗は既存店計から除外。
     前年：<?=$py_year?>年<?=$sel_month?>月同カレンダー日比較。
   </p>
 
