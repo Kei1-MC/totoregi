@@ -73,6 +73,25 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         }
     }
 }
+// ---- 店舗マスタ（account_API）から全店舗を追加 ----
+// 月初など日報の入力がまだ無い店舗も選択できるようにする。閉店店舗は過去月の参照用に「（閉店）」付きで残す
+$store_closed = [];
+try {
+    $fm_acct  = new fmRESTor($host, $db, $layout_account,
+                             $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+    $acct_res = $fm_acct->getRecords(['_limit' => 300]);
+    foreach ($acct_res['result']['response']['data'] ?? [] as $arec) {
+        $af = $arec['fieldData'];
+        $sn = trim((string)($af['店舗Ｎｏ'] ?? ''));
+        if ($sn === '' || $sn === '000') continue;
+        if (!isset($store_list[$sn])) {
+            $store_list[$sn] = trim((string)($af['店舗名'] ?? '')) ?: $sn;
+        }
+        if (trim((string)($af['営業状態'] ?? '')) === '閉店') $store_closed[$sn] = true;
+    }
+} catch (\Throwable $e) {
+    // マスタ取得失敗時は日報データから作った一覧のまま表示する
+}
 // 店舗No昇順
 ksort($store_list);
 
@@ -439,10 +458,10 @@ table.dept-table tfoot td.dept-name { text-align: left; }
       </select>
       <select name="store" class="store-select">
         <option value="">-- 店舗を選択 --</option>
-        <?php foreach ($store_list as $sno => $sname): ?>
+        <?php foreach ($store_list as $sno => $sname): $sno = (string)$sno; ?>
           <option value="<?= htmlspecialchars($sno) ?>"
-            <?= ($sno === $sel_store) ? 'selected' : '' ?>>
-            <?= htmlspecialchars("{$sno} {$sname}") ?>
+            <?= ($sno === (string)$sel_store) ? 'selected' : '' ?>>
+            <?= htmlspecialchars("{$sno} {$sname}" . (isset($store_closed[$sno]) ? '（閉店）' : '')) ?>
           </option>
         <?php endforeach; ?>
       </select>
