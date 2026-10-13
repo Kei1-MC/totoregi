@@ -135,8 +135,8 @@ foreach ($store_nos as $sno) {
         $ky   += (int)(($cy_days[$sno][$d] ?? [])['客数_閉店後'] ?? 0);
     }
     for ($d = 1; $d <= $days_in_py_month; $d++) {
-        // 当年同日が未確定の場合は前年も除外
-        if (!isset($unconfirmed[$sno][$d])) {
+        // 当年同日が「確定」していない場合（未入力・入力中）は前年も除外
+        if (isset($cy_days[$sno][$d]) && !isset($unconfirmed[$sno][$d])) {
             $py_t += (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
         }
     }
@@ -167,8 +167,8 @@ for ($d = 1; $d <= 31; $d++) {
     foreach ($store_nos as $sno) {
         $name = $sno_name[$sno];
         $cy_v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
-        // 未確定の場合は前年を集計から除外
-        $py_v = isset($unconfirmed[$sno][$d]) ? 0
+        // 当年同日が確定していない場合（未入力・入力中）は前年を集計から除外
+        $py_v = (!isset($cy_days[$sno][$d]) || isset($unconfirmed[$sno][$d])) ? 0
                 : (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
         $ca += $cy_v;
         $pa += $py_v;
@@ -630,7 +630,7 @@ table.main-tbl tbody td         { background:inherit; }
           $py_sum_for_cy = 0; $cy_sum_for_day = 0;
           foreach ($store_nos as $sno) {
               $cy_v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
-              if ($cy_v > 0) {
+              if ($cy_v > 0 && !isset($unconfirmed[$sno][$d])) {   // 確定済みの日のみ前年と比較
                   $cy_sum_for_day += $cy_v;
                   $py_sum_for_py = (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
                   $py_sum_for_cy += $py_sum_for_py;

@@ -110,9 +110,13 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         if (!$ts) continue;
         $d  = (int)date('j', $ts);
         $wk = date('W', $ts) . '_' . date('N', $ts);
-        // 閉店店舗の前年カット用：当年全店舗の最大日・週を記録
-        if ($d > $max_cy_day) $max_cy_day = $d;
-        $cy_week_keys[$wk] = true;
+        $is_kakutei = (trim((string)($f['入力状態'] ?? '')) === '確定');
+        // 閉店店舗の前年カット用：当年全店舗の「確定済み」の最大日・週を記録
+        // （前年は確定ボタン押下後に反映する。入力中の日は含めない）
+        if ($is_kakutei) {
+            if ($d > $max_cy_day) $max_cy_day = $d;
+            $cy_week_keys[$wk] = true;
+        }
         if (!isset($cy_data[$sn])) {
             $cy_data[$sn] = ['store_name' => $f['店舗名'] ?? $sn,
                              'cy_sales' => 0, 'py_matched' => 0,
@@ -121,15 +125,15 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         $cy_data[$sn]['cy_sales'] += (int)($f['合計売上'] ?? 0);
         $cy_data[$sn]['days']++;
         // 確定件数カウント
-        if (($f['入力状態'] ?? '') === '確定') {
+        if ($is_kakutei) {
             $cy_data[$sn]['kakutei']++;
+            // 前年は「確定」した日の分だけ反映する（入力中の日は本年売上には含むが前年は加算しない。
+            // hq_nyuryoku.php と同じ扱い）
+            $py_s = ($sakutai_mode === 'week')
+                ? ($py_by_week[$sn][$wk] ?? 0)
+                : ($py_by_day[$sn][$d]   ?? 0);
+            $cy_data[$sn]['py_matched'] += $py_s;
         }
-        // 前年マッチングは全日（確定・入力中とも）対象
-        // ※ 当年に売上日があれば前年の対応日を累計（未確定日でも本年売上に含まれるため）
-        $py_s = ($sakutai_mode === 'week')
-            ? ($py_by_week[$sn][$wk] ?? 0)
-            : ($py_by_day[$sn][$d]   ?? 0);
-        $cy_data[$sn]['py_matched'] += $py_s;
     }
 }
 
