@@ -27,7 +27,7 @@ FileMaker DataAPI を使った、食品小売業向け Web POS・売上管理シ
 
 ```bash
 cd /Applications/MAMP/htdocs
-git clone https://github.com/takasimak1/tomiso.git
+git clone https://github.com/Kei1-MC/totoregi.git
 ```
 
 アクセス URL: `http://localhost:8888/tomiso/`

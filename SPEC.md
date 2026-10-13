@@ -2,7 +2,7 @@
 
 **株式会社富惣 / Web POS・売上管理システム**  
 開発開始: 2024年  
-リポジトリ: https://github.com/takasimak1/tomiso
+リポジトリ: https://github.com/Kei1-MC/totoregi
 
 ---
 
