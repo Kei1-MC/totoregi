@@ -11,7 +11,7 @@ FileMaker DataAPI (fmRESTor) を PHP バックエンドとして使用。
 
 ## ローカル開発環境
 - ローカルパス: ~/Documents/Claude/Projects/富惣/FileMakerDataAPI/富惣_FileMakerDataAPI/tomiso/
-- GitHub: https://github.com/takasimak1/tomiso
+- GitHub: https://github.com/Kei1-MC/totoregi
 
 ## デプロイ手順
 ```bash
