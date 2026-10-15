@@ -2,6 +2,7 @@
 /**
  * pub_catalog.php  公開カタログJSON（ログイン不要・読み取り専用）
  *   ?scope=all            全店（stores・products）
+ *   ?scope=stores         運用中の店舗一覧だけ（商品なし。店舗案内のリンク表示用）
  *   ?scope=store&sno=101  1店舗分（その店舗の商品だけ）
  * コーポレートサイト（https://www.tomiso.co.jp）からのfetchを許可する。
  */
@@ -25,6 +26,10 @@ $base  = ($https ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? 'kei1.me'
 
 $data = catalog_get($base);
 
+if (($_GET['scope'] ?? 'all') === 'stores') {
+    echo json_encode(['updated' => $data['updated'], 'stores' => $data['stores']], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 if (($_GET['scope'] ?? 'all') === 'store') {
     $sno = (string)($_GET['sno'] ?? '');
     $store = null;
