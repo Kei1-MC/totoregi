@@ -38,3 +38,6 @@ composer.lock
 # --- FileMaker（CSVインポート時に自動生成される変換ファイル）---
 *.fmp12
 
+
+# --- 公開カタログのキャッシュ ---
+pub/_cache/*.json

@@ -33,6 +33,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
     $action = $_POST['action'] ?? '';
     $rid    = (int)trim($_POST['record_id'] ?? '');
+    // コーポレートサイト用の公開カタログを、保存・トグル後に作り直させる
+    require_once __DIR__ . '/catalog_lib.php';
+    register_shutdown_function('catalog_invalidate');
     $fm = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
 
     /* ── 発売中トグル ── */

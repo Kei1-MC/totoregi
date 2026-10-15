@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品ラインアップ（試作）｜富惣</title>
+<style>
+:root{--ink:#222;--mute:#777;--line:#e5e0d8;--bg:#faf8f4;--accent:#b3262e;--card:#fff}
+*{box-sizing:border-box}body{margin:0;font-family:"Hiragino Sans","Yu Gothic",sans-serif;color:var(--ink);background:var(--bg)}
+header{padding:16px;background:#fff;border-bottom:1px solid var(--line)}header h1{margin:0;font-size:1.2rem}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}nav a{color:var(--accent);text-decoration:none;font-size:.9rem;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:#fff}
+main{max-width:980px;margin:0 auto;padding:16px}
+h2{font-size:1.1rem;margin:24px 0 8px;border-left:4px solid var(--accent);padding-left:8px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.bar select{padding:6px;border:1px solid var(--line);border-radius:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}
+.card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#eee}
+.card .b{padding:8px}.card .n{font-size:.9rem;line-height:1.35}
+.card .p{font-weight:700;margin-top:4px}.card .o{color:var(--mute);font-size:.75rem;text-decoration:line-through;margin-left:6px;font-weight:400}
+.badge{position:absolute;top:6px;left:6px;background:var(--accent);color:#fff;font-size:.7rem;padding:2px 8px;border-radius:999px}
+.more{display:inline-block;margin-top:8px;color:var(--accent);font-size:.9rem}
+.note{color:var(--mute);font-size:.8rem;margin-top:24px}
+.closed{padding:32px;text-align:center;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:1.1rem}
+.stores a{display:inline-block;margin:4px 6px 4px 0;padding:6px 12px;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--ink);text-decoration:none}
+</style></head><body>
+<header><h1>商品ラインアップ</h1>
+<nav><a href="#/">トップ</a><a href="#/all">全品を見る</a><a href="#/stores">販売店から探す</a></nav></header>
+<main id="app">読み込み中…</main>
+<script>
+// 公開API。コーポレートサイトに組み込む時は API をフルURLにする（CORS許可済み）
+const API = (document.currentScript && document.currentScript.dataset.api) || '../pub_catalog.php';
+const DUMMY = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#eee"/><text x="200" y="158" font-size="26" text-anchor="middle" fill="#999" font-family="sans-serif">準備中</text></svg>');
+const SORTS = {recommend:'おすすめ順', sale:'セール優先', low:'価格の安い順', high:'価格の高い順', yomi:'よみがな順'};
+const BUMON_ORDER = [];  // 部門の並び（本番は bumon_API の順を JSON に載せる予定）
+let DATA = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const yen = n => '¥' + Number(n).toLocaleString();
+
+function minPrice(p){ const v = Object.values(p.stores).map(s => s.price); return Math.min(...v); }
+function priceOf(p, sno){ return sno ? p.stores[sno].price : minPrice(p); }
+function sorted(list, key, sno){
+  const a = list.map((p,i) => ({p,i}));
+  const sale = x => x.p.sale ? 0 : 1, price = x => priceOf(x.p, sno);
+  const cmp = {
+    recommend:(x,y) => sale(x)-sale(y) || x.i-y.i,        // 店舗の表示順テーブル導入までは セール優先→登録順
+    sale:(x,y) => sale(x)-sale(y) || x.i-y.i,
+    low:(x,y) => price(x)-price(y), high:(x,y) => price(y)-price(x),
+    yomi:(x,y) => (x.p.yomi||x.p.name).localeCompare(y.p.yomi||y.p.name,'ja')
+  }[key] || (() => 0);
+  return a.sort(cmp).map(x => x.p);
+}
+function card(p, sno){
+  const price = priceOf(p, sno), multi = !sno && Object.values(p.stores).some(s => s.price !== price);
+  const o = sno && p.stores[sno].org_price ? `<span class="o">${yen(p.stores[sno].org_price)}</span>` : '';
+  return `<div class="card">${p.sale ? '<span class="badge">セール</span>' : ''}
+    <img src="${esc(p.photo || DUMMY)}" alt="${esc(p.name)}" loading="lazy">
+    <div class="b"><div class="n">${esc(p.name)}</div>
+    <div class="p">${yen(price)}${multi ? '〜' : ''}${o}<small>（税込）</small></div></div></div>`;
+}
+function byBumon(list){
+  const m = new Map(); list.forEach(p => { if(!m.has(p.bumon)) m.set(p.bumon, []); m.get(p.bumon).push(p); });
+  return [...m.entries()];
+}
+function sortBar(cur, withRec){
+  const keys = Object.keys(SORTS).filter(k => withRec || k !== 'recommend');
+  return `<div class="bar">並び替え <select id="sort">${keys.map(k => `<option value="${k}" ${k===cur?'selected':''}>${SORTS[k]}</option>`).join('')}</select></div>`;
+}
+const note = () => `<p class="note">価格はすべて税込（軽減税率8%）です。店舗により価格が異なる場合があります。最終更新: ${esc((DATA.updated||'').replace('T',' ').slice(0,16))}</p>`;
+function bind(fn){ const s = $('#sort'); if (s) s.onchange = () => fn(s.value); }
+
+function viewTop(){
+  const groups = byBumon(sorted(DATA.products, 'sale'));
+  $('#app').innerHTML = groups.map(([b, l]) => `<h2>${esc(b)}</h2><div class="grid">${l.slice(0,3).map(p => card(p)).join('')}</div>
+    <a class="more" href="#/bumon/${encodeURIComponent(b)}">${esc(b)}の全品を見る（${l.length}品）</a>`).join('')
+    + `<h2>販売店</h2><div class="stores">${DATA.stores.map(s => `<a href="#/store/${s.sno}">${esc(s.name)}</a>`).join('')}</div>` + note();
+}
+function viewList(title, filter, sort='sale'){
+  const list = DATA.products.filter(filter);
+  $('#app').innerHTML = `<h2>${esc(title)}</h2>` + sortBar(sort, false)
+    + byBumon(sorted(list, sort)).map(([b,l]) => `<h2>${esc(b)}</h2><div class="grid">${l.map(p => card(p)).join('')}</div>`).join('') + note();
+  bind(k => viewList(title, filter, k));
+}
+function viewBumon(b, sort='sale'){
+  const list = sorted(DATA.products.filter(p => p.bumon === b), sort);
+  $('#app').innerHTML = `<h2>${esc(b)}</h2>` + sortBar(sort, false) + `<div class="grid">${list.map(p => card(p)).join('')}</div>` + note();
+  bind(k => viewBumon(b, k));
+}
+function viewStores(){
+  $('#app').innerHTML = '<h2>販売店</h2><div class="stores">' + DATA.stores.map(s => `<a href="#/store/${s.sno}">${esc(s.name)}</a>`).join('') + '</div>' + note();
+}
+async function viewStore(sno, sort='recommend'){
+  const st = DATA.stores.find(s => s.sno === sno);
+  if (!st) { $('#app').innerHTML = '<p>この店舗の商品情報は公開していません。</p>'; return; }
+  if (st.closed_today) { $('#app').innerHTML = `<h2>${esc(st.name)}</h2><div class="closed">本日は定休日です</div>`; return; }
+  const list = DATA.products.filter(p => p.stores[sno]).map(p => ({...p}));
+  $('#app').innerHTML = `<h2>${esc(st.name)}　現在発売中の商品</h2>` + sortBar(sort, true)
+    + byBumon(sorted(list, sort, sno)).map(([b,l]) => `<h2>${esc(b)}</h2><div class="grid">${l.map(p => card(p, sno)).join('')}</div>`).join('') + note();
+  bind(k => viewStore(sno, k));
+}
+function route(){
+  if (!DATA) return;
+  const h = decodeURIComponent(location.hash.slice(1) || '/'), seg = h.split('/').filter(Boolean);
+  if (!seg.length) return viewTop();
+  if (seg[0] === 'all') return viewList('全品', () => true);
+  if (seg[0] === 'bumon') return viewBumon(seg[1]);
+  if (seg[0] === 'stores') return viewStores();
+  if (seg[0] === 'store') return viewStore(seg[1]);
+  viewTop();
+}
+fetch(API).then(r => r.json()).then(d => { DATA = d; route(); })
+  .catch(() => { $('#app').innerHTML = '<p>ただいま準備中です。</p>'; });
+window.addEventListener('hashchange', route);
+</script></body></html>
