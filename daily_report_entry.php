@@ -423,6 +423,7 @@ function totoregiAgg(array $pos_records, ?string $cutoff_hm, array $all_busho = 
     $receipts = [];
     $sum = 0;
     $by_field = array_fill_keys(array_keys($all_busho), 0);
+    $other = 0;   // 日報の部門に当てはまらない売上（分析部門が未設定でレジ表示部門で記録された商品など）
     foreach ($pos_records as $row) {
         $f  = $row['fieldData'];
         $ts = $f['作成情報タイムスタンプ'] ?? '';
@@ -437,9 +438,11 @@ function totoregiAgg(array $pos_records, ?string $cutoff_hm, array $all_busho = 
         $label = trim((string)($f['部門'] ?? ''));
         if (isset($label_to_field[$label])) {
             $by_field[$label_to_field[$label]] += $kingaku;
+        } else {
+            $other += $kingaku;
         }
     }
-    return ['count' => count($receipts), 'sum' => $sum, 'by_field' => $by_field];
+    return ['count' => count($receipts), 'sum' => $sum, 'by_field' => $by_field, 'other' => $other];
 }
 function trCount(array $tr): string {
     return $tr['count'] > 0 ? '<span class="tr-val">' . number_format($tr['count']) . '</span>人' : '<span class="tr-none">―</span>';
@@ -730,27 +733,24 @@ include __DIR__ . '/header.php';
 
 /* 部門別内訳（レジ実績・参考表示のみ） */
 .bumon-ref-wrap { margin-top: 0.6em; }
-.bumon-ref-toggle {
-    font-size: 0.8em; color: #00695c; font-weight: bold;
-    cursor: pointer; user-select: none;
-}
-.bumon-ref-toggle .accord-arrow { display: inline-block; transition: transform .2s; }
-.bumon-ref-toggle.open .accord-arrow { transform: rotate(180deg); }
+.bumon-ref-title { font-size: 0.8em; color: #00695c; font-weight: bold; }
 .bumon-ref-body {
-    display: none;
     margin-top: 0.4em;
     padding: 0.5em 0.7em;
     background: #f7faf9;
     border: 1px solid #d8e8e4;
     border-radius: 0.5em;
 }
-.bumon-ref-body.open { display: block; }
 .bumon-ref-row {
     display: flex; justify-content: space-between;
     font-size: 0.82em; color: #444;
     padding: 0.15em 0;
 }
 .bumon-ref-row span:last-child { font-weight: bold; color: #2e7d32; }
+.bumon-ref-row.bumon-ref-total { border-top: 1px solid #b7d3cc; margin-top: 0.3em; padding-top: 0.3em; font-weight: bold; }
+.bumon-ref-empty { font-size: 0.8em; color: #888; padding: 0.2em 0; }
+.bumon-ref-note { font-size: 0.74em; color: #6d4c00; background: #fffde7; border-left: 3px solid #f9a825; padding: 0.35em 0.6em; margin-top: 0.4em; line-height: 1.5; }
+.bumon-ref-note a { color: #b26a00; font-weight: bold; }
 
 /* 確定バナー */
 .kakutei-banner {
@@ -1052,7 +1052,7 @@ include __DIR__ . '/header.php';
   // 部門別内訳はレジ実績（分析部門）からの自動集計を参考表示するのみで、入力・保存はしない）
   function timeSec(string $suffix, array $slot,
                    array $fd, array $py_fd, bool $is_kakutei,
-                   string $cmp_header, array $tr, array $all_busho): void {
+                   string $cmp_header, array $tr, array $all_busho, string $date_html): void {
       $label        = $slot['label'];
       $action       = $slot['action'];
       $field_kyaku  = $slot['field_kyaku'];
@@ -1088,23 +1088,29 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-py">' . ($py_uriage_val > 0 ? '<span class="py-val">¥' . number_format($py_uriage_val) . '</span>' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
-      // 部門別内訳（レジの分析部門から自動集計した参考値。入力・保存はしない）
+      // 部門別内訳（レジの分析部門から自動集計した参考値。入力・保存はしない。最初から表示する）
+      echo '<div class="bumon-ref-wrap">';
+      echo '<div class="bumon-ref-title">🧾 ととレジ売上（分析部門別・参考）</div>';
+      echo '<div class="bumon-ref-body">';
       $busho_breakdown = array_filter($tr['by_field'] ?? [], fn($v) => $v > 0);
-      if (!empty($busho_breakdown)) {
-          echo '<div class="bumon-ref-wrap">';
-          echo '<div class="bumon-ref-toggle" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\')">';
-          echo '<span class="accord-arrow">▼</span> 部門別内訳を見る（レジ実績・参考）</div>';
-          echo '<div class="bumon-ref-body">';
-          foreach ($all_busho as $bf => $blabel) {
-              if (empty($busho_breakdown[$bf])) continue;
-              echo '<div class="bumon-ref-row"><span>' . $blabel . '</span><span>¥' . number_format($busho_breakdown[$bf]) . '</span></div>';
-          }
-          echo '</div></div>';
+      foreach ($all_busho as $bf => $blabel) {
+          if (empty($busho_breakdown[$bf])) continue;
+          echo '<div class="bumon-ref-row"><span>' . $blabel . '</span><span>¥' . number_format($busho_breakdown[$bf]) . '</span></div>';
       }
+      if (($tr['other'] ?? 0) > 0) {
+          echo '<div class="bumon-ref-row"><span>その他（未分類）</span><span>¥' . number_format($tr['other']) . '</span></div>';
+      }
+      if (empty($busho_breakdown) && ($tr['other'] ?? 0) <= 0) {
+          echo '<div class="bumon-ref-empty">この時間帯のレジ売上はまだありません</div>';
+      }
+      echo '<div class="bumon-ref-row bumon-ref-total"><span>合　計</span><span>' . ($tr['sum'] > 0 ? '¥' . number_format($tr['sum']) : '―') . '</span></div>';
+      echo '</div>';
+      echo '<div class="bumon-ref-note">✏ レジの売上の訂正は、<a href="sales_list.php?date=' . htmlspecialchars($date_html, ENT_QUOTES) . '">売上一覧</a>の「訂正」から行います（この画面では数値を直せません）。</div>';
+      echo '</div>';
 
       if (!$is_kakutei) {
           $plain_label = preg_replace('/[🕛🕒🕔]\s*/', '', $label);
-          echo '<button type="button" class="reflect-btn" onclick="reflectRegi(\'' . $suffix . '\', this)">🧾 レジの実績を反映</button>';
+          echo '<button type="button" class="reflect-btn" onclick="reflectRegi(\'' . $suffix . '\', this)">🧾 客数・累計売上を反映</button>';
           echo '<button type="submit" class="save-btn">💾 ' . $plain_label . ' を保存</button>';
       }
       echo '</form>';
@@ -1114,7 +1120,7 @@ include __DIR__ . '/header.php';
 
   <?php foreach ($time_slots as $suffix => $slot): ?>
     <?php timeSec($suffix, $slot, $fd, $py_fd, $is_kakutei || $is_future_page,
-        $cmp_header, ${'tr_' . $suffix}, $all_busho); ?>
+        $cmp_header, ${'tr_' . $suffix}, $all_busho, $date_html); ?>
   <?php endforeach; ?>
 
   <!-- 閉店後 -->
@@ -1183,6 +1189,8 @@ include __DIR__ . '/header.php';
         </div>
         <?php endforeach; ?>
 
+        <div class="bumon-ref-note" style="margin-top:0.6em;">✏ レジの売上の訂正は、<a href="sales_list.php?date=<?= htmlspecialchars($date_html, ENT_QUOTES) ?>">売上一覧</a>の「訂正」から行います。この画面の入力は、百貨店レジ分などレジ以外の売上の補正用です。</div>
+
         <!-- 合計行 -->
         <div class="total-bar">
           <span class="t-label">合　計</span>
@@ -1216,7 +1224,7 @@ include __DIR__ . '/header.php';
 
         <!-- 保存・確定ボタン -->
         <?php if (!$is_kakutei && !$is_future_page): ?>
-          <button type="button" class="reflect-btn" onclick="reflectRegi('heiten', this)">🧾 レジの実績を反映</button>
+          <button type="button" class="reflect-btn" onclick="reflectRegi('heiten', this)">🧾 部門別売上・客数を反映</button>
           <button type="button" class="save-btn"
                   onclick="submitHeiten('save_heiten')">💾 閉店後データを保存</button>
           <button type="button" class="save-btn kakutei"
