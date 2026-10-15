@@ -41,3 +41,8 @@ composer.lock
 
 # --- 公開カタログのキャッシュ ---
 pub/_cache/*.json
+
+# --- 商品写真の候補データ（アップロード画像・meta）---
+photo_data/*
+!photo_data/.htaccess
+!photo_data/.gitkeep
