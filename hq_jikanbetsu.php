@@ -11,6 +11,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/test_store.php';
 
 // ---- 月選択 ----
 $today = new DateTime();
@@ -96,6 +97,7 @@ for ($d = 1; $d <= $days_in_month; $d++) {
 if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r['result']['response']['data'] ?? [] as $row) {
         $f = $row['fieldData'];
+        if (is_test_store($f['fk_店舗No'] ?? '')) continue;
         $fm_date = $f['売上日'] ?? '';
         $parts   = explode('/', $fm_date);
         $day     = isset($parts[1]) ? (int)$parts[1] : 0;

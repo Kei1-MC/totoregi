@@ -11,6 +11,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/test_store.php';
 
 // ---- 月・店舗選択 ----
 $today = new DateTime();
@@ -58,7 +59,7 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r['result']['response']['data'] ?? [] as $row) {
         $f  = $row['fieldData'];
         $sn = (string)($f['fk_店舗No'] ?? '');
-        if ($sn === '' || $sn === '000') continue;
+        if ($sn === '' || $sn === '000' || is_test_store($sn)) continue;
 
         // ドロップダウン用リスト（重複排除）
         if (!isset($store_list[$sn])) {
@@ -83,7 +84,7 @@ try {
     foreach ($acct_res['result']['response']['data'] ?? [] as $arec) {
         $af = $arec['fieldData'];
         $sn = trim((string)($af['店舗Ｎｏ'] ?? ''));
-        if ($sn === '' || $sn === '000') continue;
+        if ($sn === '' || $sn === '000' || is_test_store($sn)) continue;
         if (!isset($store_list[$sn])) {
             $store_list[$sn] = trim((string)($af['店舗名'] ?? '')) ?: $sn;
         }

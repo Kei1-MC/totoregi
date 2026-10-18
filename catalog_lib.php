@@ -29,6 +29,8 @@ function catalog_tax_in(int $price, string $mode = '切り捨て'): int {
     return intdiv($v, 100);
 }
 
+require_once __DIR__ . '/test_store.php';
+
 function catalog_norm_rounding(string $s): string {
     $s = trim($s);
     return in_array($s, ['切り捨て', '切捨て', '切捨'], true) ? '切り捨て'
@@ -92,7 +94,7 @@ function catalog_build(string $base_url): ?array {
         $f  = $row['fieldData'];
         $no = (string)($f['店舗Ｎｏ'] ?? '');
         $nm = trim((string)($f['店舗名'] ?? ''));
-        if ($no === '' || $no === '000' || $nm === '') continue;
+        if ($no === '' || $no === '000' || is_test_store($no) || $nm === '') continue;
         $a = $acct[$no] ?? ['name' => $nm, 'closed' => false, 'rounding' => ''];
         if (trim((string)($f['営業状態'] ?? '')) === '閉店') $a['closed'] = true;
         $r = trim((string)($f['端数処理'] ?? ''));
