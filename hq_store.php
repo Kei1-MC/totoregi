@@ -70,7 +70,7 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
             $fmd = $f['売上日'] ?? '';
             $p   = explode('/', $fmd);
             $d   = isset($p[1]) ? (int)$p[1] : 0;
-            if ($d >= 1) $cy_days[$d] = $f;
+            if ($d >= 1 && !(isset($cy_days[$d]) && (float)($cy_days[$d]['合計売上'] ?? 0) > 0 && (float)($f['合計売上'] ?? 0) <= 0)) $cy_days[$d] = $f; // 同日が複数あれば売上入りを優先
         }
     }
 }
@@ -114,7 +114,7 @@ if ($sel_store !== '') {
             $fmd = $f['売上日'] ?? '';
             $p   = explode('/', $fmd);
             $d   = isset($p[1]) ? (int)$p[1] : 0;
-            if ($d >= 1) $py_days[$d] = $f;
+            if ($d >= 1 && !(isset($py_days[$d]) && (float)($py_days[$d]['合計売上'] ?? 0) > 0 && (float)($f['合計売上'] ?? 0) <= 0)) $py_days[$d] = $f;
         }
     }
 }

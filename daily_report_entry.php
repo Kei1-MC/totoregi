@@ -117,7 +117,8 @@ $qr = $fm->findRecords([
     'query' => [['fk_店舗No' => $store_id, '売上日' => $target_date_fm]],
     'limit' => 1,
 ]);
-if (($qr['result']['messages'][0]['code'] ?? '0') !== '401') {
+$find_code   = (string)($qr['result']['messages'][0]['code'] ?? '?');
+if ($find_code !== '401') {
     $rec = $qr['result']['response']['data'][0] ?? null;
     if ($rec) {
         $record_id      = $rec['recordId'];
@@ -245,7 +246,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fm_err_code = '';
         $fm_err_msg  = '';
 
+        // 新規作成の直前に再検索（検索失敗・同時操作による日報の重複作成を防ぐ）
         if ($record_id === null) {
+            $qr_chk = $fm->findRecords([
+                'query' => [['fk_店舗No' => $store_id, '売上日' => $target_date_fm]],
+                'limit' => 1,
+            ]);
+            $chk_code = (string)($qr_chk['result']['messages'][0]['code'] ?? '?');
+            if ($chk_code === '0' && !empty($qr_chk['result']['response']['data'][0])) {
+                $record_id = $qr_chk['result']['response']['data'][0]['recordId'];
+            } elseif ($chk_code !== '401') {
+                $fm_err_code = $chk_code;
+                $fm_err_msg  = '日報の存在確認に失敗したため保存を中止しました。もう一度保存してください。';
+                $record_id   = false; // 新規作成も更新もしない
+            }
+        }
+
+        if ($record_id === false) {
+            // 存在確認失敗: 保存しない
+        } elseif ($record_id === null) {
             // 新規作成
             $save['fk_店舗No'] = $store_id;
             $save['店舗名']    = $store_name;
