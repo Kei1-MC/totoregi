@@ -19,6 +19,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/test_store.php';
 require_once __DIR__ . '/bumon_master.php';
 
 // ============================================================
@@ -68,7 +69,7 @@ $store_master = [];
 foreach ($resAccount['result']['response']['data'] ?? [] as $row) {
     $f   = $row['fieldData'];
     $sno = trim((string)($f['店舗Ｎｏ'] ?? ''));
-    if ($sno === '') continue;
+    if ($sno === '' || is_test_store($sno)) continue;
     $store_master[$sno] = trim($f['店舗名'] ?? $sno);
 }
 uksort($store_master, fn($a, $b) => (int)$a <=> (int)$b);
@@ -83,7 +84,11 @@ function fetchAllRecords(fmRESTor $fm, array $query, int $chunk = 2000, int $max
         if (($r['result']['messages'][0]['code'] ?? '0') === '401') break;
         $data = $r['result']['response']['data'] ?? [];
         if (!$data) break;
-        foreach ($data as $row) $all[] = $row['fieldData'];
+        foreach ($data as $row) {
+            $fd = $row['fieldData'];
+            if (is_test_store($fd['店舗No'] ?? $fd['fk_店舗No'] ?? '')) continue;   // テスト店舗は集計しない
+            $all[] = $fd;
+        }
         if (count($data) < $chunk) break;
         $offset += $chunk;
     }

@@ -11,6 +11,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/test_store.php';
 
 // ---- 月選択 ----
 $today = new DateTime();
@@ -71,7 +72,7 @@ if (($r2['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r2['result']['response']['data'] ?? [] as $row) {
         $f  = $row['fieldData'];
         $sn = (string)($f['fk_店舗No'] ?? '');
-        if ($sn === '') continue;
+        if ($sn === '' || is_test_store($sn)) continue;
         $ts = hq_fm_ts($f['売上日'] ?? '');
         if (!$ts) continue;
         $d   = (int)date('j', $ts);
@@ -100,12 +101,13 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r['result']['response']['data'] ?? [] as $row) {
         $f  = $row['fieldData'];
         $sn = (string)($f['fk_店舗No'] ?? '');
+        if (is_test_store($sn)) continue;
         $key = $sn . '|' . ($f['売上日'] ?? '');
         $cy_rows_by_key[$key] = $f; // 同一店舗・同一日は後勝ち
     }
     foreach ($cy_rows_by_key as $f) {
         $sn = (string)($f['fk_店舗No'] ?? '');
-        if ($sn === '') continue;
+        if ($sn === '' || is_test_store($sn)) continue;
         $ts = hq_fm_ts($f['売上日'] ?? '');
         if (!$ts) continue;
         $d  = (int)date('j', $ts);

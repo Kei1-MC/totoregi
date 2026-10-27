@@ -23,10 +23,12 @@ require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 require_once __DIR__ . '/bumon_master.php';
 require_once __DIR__ . '/instore_codes.php';
+require_once __DIR__ . '/tax_lib.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
 $today      = date('m/d/Y');
+$tax_rounding = tax_store_rounding($store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass);
 
 // =====================================================================
 // インストアコード 店舗別設定
@@ -147,6 +149,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items = json_decode($_POST['cart_items'] ?? '[]', true) ?? [];
     }
 
+    // 二重登録防止: 同じ確定トークンの再送は、登録済みの結果をそのまま返す
+    // （通信切れで応答が届かず再送された場合・ボタン連打でも売上は1件のみ）
+    $submit_token = $is_ajax ? preg_replace('/[^A-Za-z0-9\-]/', '', (string)($json_body['submit_token'] ?? '')) : '';
+    if ($submit_token !== '' && isset($_SESSION['reg_done'][$submit_token])) {
+        header('Content-Type: application/json');
+        echo json_encode($_SESSION['reg_done'][$submit_token]);
+        exit();
+    }
+
     if (empty($items)) {
         if ($is_ajax) { header('Content-Type: application/json'); echo json_encode(['ok'=>false,'error'=>'カートに商品がありません。']); exit(); }
         $error_message = 'カートに商品がありません。';
@@ -201,7 +212,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($is_ajax) {
                 header('Content-Type: application/json');
                 if ($fail === 0) {
-                    echo json_encode(['ok'=>true,'receipt_no'=>$receipt_no,'total'=>$total,'count'=>count($items)]);
+                    $resp = ['ok'=>true,'receipt_no'=>$receipt_no,'total'=>$total,'count'=>count($items)];
+                    if ($submit_token !== '') {
+                        $_SESSION['reg_done'][$submit_token] = $resp;
+                        $_SESSION['reg_done'] = array_slice($_SESSION['reg_done'], -20, null, true);
+                    }
+                    echo json_encode($resp);
                 } else {
                     echo json_encode(['ok'=>false,'error'=>count($items).'件中 '.$fail.'件の明細登録に失敗しました。']);
                 }
@@ -729,6 +745,8 @@ body { overflow: hidden; margin: 0; padding: 0; }
 .rcpt-grand-total .label { font-size: 0.9em; font-weight: bold; color: #555; }
 .rcpt-grand-total .amount { font-size: 1.5em; font-weight: bold; color: #c62828; }
 .rcpt-grand-total .tax { font-size: 0.6em; color: #888; display: block; text-align: right; }
+.rcpt-tax-incl { display: flex; justify-content: space-between; align-items: baseline; padding: 0.2em 0; font-weight: bold; }
+.rcpt-tax-incl .amt { font-size: 1.15em; }
 
 .rcpt-footer-msg {
     text-align: center; margin-top: 0.6em;
@@ -751,6 +769,26 @@ body { overflow: hidden; margin: 0; padding: 0; }
     font-weight: bold; cursor: pointer;
 }
 .rcpt-btn-print:hover { background: #0d47a1; }
+.rcpt-btn-back, .rcpt-btn-nopr {
+    background: #fff; color: #333; border: 1px solid #999;
+    border-radius: 0.5em; padding: 0.7em; font-size: 1em;
+    font-weight: bold; cursor: pointer;
+}
+.rcpt-btn-back { flex: 0 0 auto; }
+.rcpt-btn-nopr { flex: 0 0 auto; font-size: 0.85em; }
+.rcpt-buttons button:disabled { opacity: .5; cursor: default; }
+.rcpt-pending {
+    margin-top: 0.4em; padding: 0.4em 0.6em; border-radius: 0.4em;
+    background: #fff8e1; color: #8a6d00; font-size: 0.8em; text-align: center;
+}
+.rcpt-error { margin-top: 0.6em; color: #c62828; font-weight: bold; text-align: center; }
+.rcpt-nopr-confirm {
+    margin-top: 0.8em; padding: 0.8em; border: 2px solid #c62828;
+    border-radius: 0.5em; background: #fff; text-align: center;
+}
+.rcpt-nopr-confirm p { margin: 0 0 0.6em; font-weight: bold; }
+.rcpt-nopr-confirm .rcpt-buttons { margin-top: 0; }
+.rcpt-btn-nopr-ok { flex: 1; background: #c62828; color: #fff; border: none; border-radius: 0.5em; padding: 0.7em; font-weight: bold; font-size: 1em; cursor: pointer; }
 
 /* ===================== タブレット向け最適化（768px以上） ===================== */
 /* スマホでは使用しない想定。縦1列・カート下固定レイアウトを維持しつつ拡大。 */
@@ -1192,13 +1230,36 @@ function recalcItem(item) {
     item.subtotal = unit * item.qty;
 }
 
-/* ===================== 登録（AJAX） ===================== */
-elRegBtn.addEventListener('click', async function() {
-    if (!cart.length) return;
-    elRegBtn.disabled = true;
-    elRegBtn.textContent = '送信中…';
-    elRegBtn.classList.add('loading');
+/* ===================== 登録（明細書確認 → 印刷／印刷せず確定） ===================== */
+/* 「登録する」では売上を登録せず、明細書を表示するだけ。
+ * 売上の登録は明細書画面の「印刷」「印刷せず確定」を押した時点で行う。
+ * 「戻る」でカートに戻って追加・削除・数量変更ができる。 */
+const TAX_ROUNDING = <?= json_encode($tax_rounding, JSON_UNESCAPED_UNICODE) ?>;
+const TAX_RATE_PCT = <?= (int)TAX_RATE_PERCENT ?>;
 
+/** 税込金額（整数演算。tax_lib.php の tax_included() と同じ式） */
+function taxIncluded(total) {
+    const x = total * (100 + TAX_RATE_PCT);
+    if (TAX_ROUNDING === '切り捨て') return Math.floor(x / 100);
+    if (TAX_ROUNDING === '四捨五入') return Math.floor((x + 50) / 100);
+    return Math.floor((x + 99) / 100);
+}
+
+let submitToken = null;   // 確定1回ごとの二重登録防止トークン
+function newToken() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+elRegBtn.addEventListener('click', function() {
+    if (!cart.length) return;
+    submitToken = newToken();
+    const total = cart.reduce((s, it) => s + it.subtotal, 0);
+    showReceipt(cart, null, total, cart.length);
+});
+
+/** 売上を登録して結果を返す（失敗時は {ok:false,error}） */
+async function submitSale() {
     try {
         const res = await fetch('sales_entry.php', {
             method: 'POST',
@@ -1206,26 +1267,13 @@ elRegBtn.addEventListener('click', async function() {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({ cart_items: cart })
+            body: JSON.stringify({ cart_items: cart, submit_token: submitToken })
         });
-        const data = await res.json();
-
-        if (data.ok) {
-            armSessionWarnTimer();
-            showReceipt(cart, data.receipt_no, data.total, data.count);
-            cart = [];
-            renderCart();
-        } else {
-            showToast(elToastErr, '✕ ' + (data.error || '登録に失敗しました'));
-        }
+        return await res.json();
     } catch (err) {
-        showToast(elToastErr, '✕ 通信エラー: ' + err.message);
+        return { ok: false, error: '通信エラー: ' + err.message + '（もう一度押しても二重登録にはなりません）' };
     }
-
-    elRegBtn.textContent = '登録する';
-    elRegBtn.classList.remove('loading');
-    elRegBtn.disabled = cart.length === 0;
-});
+}
 
 /* トースト表示 */
 function showToast(el, msg) {
@@ -1298,7 +1346,7 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     html += '<div class="rcpt-card">';
     html += '<div class="rcpt-header">';
     html += '<div class="store">🐟 <?= htmlspecialchars($store_name) ?></div>';
-    html += '<div class="date">' + esc(dateStr) + '　No.' + esc(receiptNo) + '</div>';
+    html += '<div class="date">' + esc(dateStr) + '　No.<span id="rcpt-no">' + (receiptNo === null ? '（確定時に採番）' : esc(receiptNo)) + '</span></div>';
     html += '<div class="badge-ok">明細書</div>';
     html += '<div class="rcpt-not-receipt">領収書ではありません</div>';
     html += '</div>';
@@ -1358,6 +1406,8 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     html += '<span class="amount">¥' + grandTotal.toLocaleString() + '</span>';
     html += '<span class="tax">（本体価格）</span>';
     html += '</div></div>';
+    html += '<div class="rcpt-tax-incl"><span>税込合計（' + TAX_RATE_PCT + '%・' + esc(TAX_ROUNDING) + '）</span>';
+    html += '<span class="amt">¥' + taxIncluded(grandTotal).toLocaleString() + '</span></div>';
 
     html += '<div class="rcpt-footer-msg">ありがとうございました</div>';
     html += '<div class="rcpt-corp">';
@@ -1379,7 +1429,9 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     _starReceiptData = {
         storeName : '<?= htmlspecialchars($store_name, ENT_QUOTES) ?>',
         dateStr   : dateStr,
-        receiptNo : String(receiptNo),
+        receiptNo : receiptNo === null ? '' : String(receiptNo),
+        taxIncl   : taxIncluded(grandTotal),
+        taxLabel  : TAX_RATE_PCT + '%・' + TAX_ROUNDING,
         groups    : groups,
         catOrder  : order,
         grandTotal: grandTotal,
@@ -1389,9 +1441,13 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     };
 
     /* ボタン */
-    html += '<div class="rcpt-buttons">';
+    html += '<div class="rcpt-pending" id="rcpt-pending">まだ売上は登録されていません。「印刷」または「印刷せず確定」で登録されます。</div>';
+    html += '<div class="rcpt-buttons" id="rcpt-buttons">';
+    html += '<button class="rcpt-btn-back" id="rcpt-back-btn">← 戻る</button>';
     html += '<button class="rcpt-btn-print" id="rcpt-print-btn">🖨 印刷</button>';
+    html += '<button class="rcpt-btn-nopr" id="rcpt-nopr-btn">印刷せず確定</button>';
     html += '</div>';
+    html += '<div id="rcpt-msg"></div>';
 
     inner.innerHTML = html;
     overlay.classList.add('show');
@@ -1413,10 +1469,64 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         } catch(e) { console.warn('Barcode error for ' + bumon + ':', e); }
     });
 
-    /* 印刷ボタン（印刷実行後、レシートを閉じて売上登録画面に戻る＝次のお客様の入力へ） */
-    document.getElementById('rcpt-print-btn').addEventListener('click', function() {
-        starPrintReceipt(this);
+    var elMsg     = document.getElementById('rcpt-msg');
+    var btnBack   = document.getElementById('rcpt-back-btn');
+    var btnPrint  = document.getElementById('rcpt-print-btn');
+    var btnNoPr   = document.getElementById('rcpt-nopr-btn');
+    var busy = false;
+    function setBusy(b) { busy = b; btnBack.disabled = btnPrint.disabled = btnNoPr.disabled = b; }
+    function showErr(msg) { elMsg.innerHTML = '<div class="rcpt-error">✕ ' + esc(msg) + '</div>'; }
+    function closeAfterSale() {
+        cart = [];
+        submitToken = null;
+        renderCart();
+        armSessionWarnTimer();
         overlay.classList.remove('show');
+    }
+
+    /* 戻る: 売上は登録せず、カートのまま商品登録画面へ */
+    btnBack.addEventListener('click', function() {
+        if (busy) return;
+        submitToken = null;
+        overlay.classList.remove('show');
+    });
+
+    /* 印刷: ここで売上を登録 → 採番されたレシート番号で印刷 */
+    btnPrint.addEventListener('click', async function() {
+        if (busy) return;
+        setBusy(true); elMsg.innerHTML = '';
+        btnPrint.textContent = '⏳ 登録中...';
+        var data = await submitSale();
+        if (!data.ok) {
+            btnPrint.textContent = '🖨 印刷';
+            setBusy(false);
+            showErr(data.error || '登録に失敗しました');
+            return;
+        }
+        _starReceiptData.receiptNo = String(data.receipt_no);
+        document.getElementById('rcpt-no').textContent = data.receipt_no;
+        var pend = document.getElementById('rcpt-pending'); if (pend) pend.style.display = 'none';
+        starPrintReceipt(btnPrint);
+        closeAfterSale();
+    });
+
+    /* 印刷せず確定: プリンター故障・用紙切れ用。誤操作防止の確認付き */
+    btnNoPr.addEventListener('click', function() {
+        if (busy) return;
+        elMsg.innerHTML =
+            '<div class="rcpt-nopr-confirm"><p>印刷せずに売上だけ登録します。よろしいですか？</p>' +
+            '<div class="rcpt-buttons"><button class="rcpt-btn-back" id="rcpt-nopr-cancel">やめる</button>' +
+            '<button class="rcpt-btn-nopr-ok" id="rcpt-nopr-ok">売上を登録する（印刷なし）</button></div></div>';
+        document.getElementById('rcpt-nopr-cancel').addEventListener('click', function() { elMsg.innerHTML = ''; });
+        document.getElementById('rcpt-nopr-ok').addEventListener('click', async function() {
+            if (busy) return;
+            setBusy(true);
+            this.textContent = '⏳ 登録中...';
+            var data = await submitSale();
+            if (!data.ok) { setBusy(false); showErr(data.error || '登録に失敗しました'); return; }
+            closeAfterSale();
+            showToast(elToastOk, '✓ 売上を登録しました（印刷なし）No.' + data.receipt_no);
+        });
     });
 }
 

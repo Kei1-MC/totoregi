@@ -11,6 +11,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
 }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/test_store.php';
 
 // ---- 年月選択 ----
 $today      = new DateTime();
@@ -68,7 +69,7 @@ if (($r1['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r1['result']['response']['data'] ?? [] as $rec) {
         $f   = $rec['fieldData'];
         $sno = (string)($f['fk_店舗No'] ?? '');
-        if ($sno === '' || $sno === '000') continue;
+        if ($sno === '' || $sno === '000' || is_test_store($sno)) continue;
         $sno_name[$sno] = $f['店舗名'] ?? $sno;
         $fmd = $f['売上日'] ?? '';
         $p   = explode('/', $fmd);
@@ -100,7 +101,7 @@ if (($r2['result']['messages'][0]['code'] ?? '0') !== '401') {
     foreach ($r2['result']['response']['data'] ?? [] as $rec) {
         $f   = $rec['fieldData'];
         $sno = (string)($f['fk_店舗No'] ?? '');
-        if ($sno === '' || $sno === '000') continue;
+        if ($sno === '' || $sno === '000' || is_test_store($sno)) continue;
         if (!isset($sno_name[$sno])) $sno_name[$sno] = $f['店舗名'] ?? $sno;
         $fmd = $f['売上日'] ?? '';
         $p   = explode('/', $fmd);

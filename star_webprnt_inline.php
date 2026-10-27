@@ -87,6 +87,11 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     req += b.createTextElement({ emphasis: 'false' });
     req += b.createAlignmentElement({ position: 'right' });
     req += b.createTextElement({ codepage: 'utf8', data: '(本体価格)\n' });
+    if (typeof _starReceiptData !== 'undefined' && _starReceiptData && _starReceiptData.taxIncl) {
+        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '税込合計  \xa5' + _starReceiptData.taxIncl.toLocaleString() + '\n' });
+        req += b.createTextElement({ emphasis: 'false' });
+        req += b.createTextElement({ codepage: 'utf8', data: '(' + _starReceiptData.taxLabel + ')\n' });
+    }
     req += b.createFeedElement({ line: 2 });
 
     /* フッター */
