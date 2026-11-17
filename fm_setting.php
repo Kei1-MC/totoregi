@@ -21,6 +21,9 @@ $layout_haiki   = 'haiki_API';        // 廃棄日報（商品単位・1日1回�
 
 // ■ 発注・受注（工場向け）
 $layout_product = 'product_API';      // 商品マスタ（発注用 ※12,403件）
+$layout_order      = 'order_API';       // 発注（店舗→本社・工場。店舗×納品日×便×商品で1レコード）
+$layout_order_item = 'order_item_API';  // 発注可能商品（店舗×便×部門ごとの定番リスト）
+$layout_order_bin  = 'order_bin_API';   // 出荷便マスタ（締め時刻・納品までの日数つき）
 
 // ■ 売上日報（店舗入力・本部集計）
 $layout_daily_report     = 'daily_report_API';      // _24_売上日報（CRUD全操作）
@@ -36,6 +39,9 @@ $layout_daily_report_sum = 'daily_report_sum_API';  // _24_売上日報（集計
 //   bumon_API            → 部門マスタ（部門CD/部門名/並び順）
 //   haiki_API            → _25_廃棄日報（fk_店舗No/店舗名/売上日/商品名/廃棄数）
 //   product_API          → 商品マスタ
+//   order_API            → 発注（新規テーブル。項目は FM新規フィールド設定手順_発注機能.md 参照）
+//   order_item_API       → 発注可能商品（新規テーブル）
+//   order_bin_API        → _40_出荷便マスタ（締め時刻・納品までの日数を追加）
 //   daily_report_API     → _24_売上日報（全フィールド配置）
 //   daily_report_sum_API → _24_売上日報（週番号・曜日・年 の計算フィールドを必ず配置）
 // ============================================================

@@ -12,6 +12,11 @@ function isStarWebPRNTBrowser() {
 
 /* 半角=1・全角=2として表示幅を計算（実機テスト印刷で確認した実測値: 半角46文字） */
 var RECEIPT_LINE_WIDTH = 46;
+/* 明細を「商品名 ……… ¥金額」の1行にするときの幅。実機は半角の幅が一定でなく、計算上46桁の行が
+   右端を超えて金額の最後の1文字が折り返された（2026-11-12 実機テスト）ため、余裕を持たせて42桁にする。
+   これを超える商品名は、従来どおり名前の行と金額の行の2行にする。 */
+var RECEIPT_ITEM_WIDTH = 42;
+var RECEIPT_FEED_BEFORE_CUT = 1;   /* 以前は4。実機で最後の行が切れないか確認すること */
 function _receiptStrWidth(s) {
     var w = 0;
     for (var i = 0; i < s.length; i++) {
@@ -39,11 +44,10 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     req += b.createTextElement({ width: 1, height: 1 });
     req += b.createTextElement({ emphasis: 'false' });
     req += b.createTextElement({ codepage: 'utf8', data: dateStr + '  No.' + receiptNo + (isKakunin ? '（訂正）' : '') + '\n' });
-    req += b.createTextElement({ codepage: 'utf8', width: 2, height: 2, data: '明細書\n' });
-    req += b.createTextElement({ width: 1, height: 1 });
-    req += b.createTextElement({ codepage: 'utf8', data: '領収書ではありません\n' });
+    /* 紙を短くするため「明細書」と「領収書ではありません」は標準サイズの1行にまとめる */
+    req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '明細書（領収書ではありません）\n' });
+    req += b.createTextElement({ emphasis: 'false' });
     req += b.createRuledLineElement({ thickness: 'medium', width: 576 });
-    req += b.createFeedElement({ line: 1 });
 
     /* 部門別明細 */
     catOrder.forEach(function(bumon) {
@@ -55,7 +59,6 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
         req += b.createAlignmentElement({ position: 'left' });
         req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: _bumonHeaderLine(bumon, bTotal) + '\n' });
         req += b.createTextElement({ emphasis: 'false' });
-        req += b.createRuledLineElement({ thickness: 'thin', width: 576 });
 
         bItems.forEach(function(it) {
             var nebStr = '';
@@ -64,10 +67,19 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
             } else if (it.nebiki_gaku > 0) {
                 nebStr = ' (-\xa5' + it.nebiki_gaku.toLocaleString() + ')';
             }
+            var itLeft  = it.name + nebStr;
+            var itRight = '\xa5' + it.subtotal.toLocaleString();
+            var itPad   = RECEIPT_ITEM_WIDTH - _receiptStrWidth(itLeft) - _receiptStrWidth(itRight);
             req += b.createAlignmentElement({ position: 'left' });
-            req += b.createTextElement({ codepage: 'utf8', data: it.name + nebStr + '\n' });
-            req += b.createAlignmentElement({ position: 'right' });
-            req += b.createTextElement({ codepage: 'utf8', data: '\xa5' + it.subtotal.toLocaleString() + '\n' });
+            if (itPad >= 1) {
+                /* 「商品名 ……… ¥金額」を1行に */
+                req += b.createTextElement({ codepage: 'utf8', data: itLeft + new Array(itPad + 1).join(' ') + itRight + '\n' });
+            } else {
+                /* 商品名が長くて1行に収まらないときは、従来どおり名前の行と金額の行に分ける */
+                req += b.createTextElement({ codepage: 'utf8', data: itLeft + '\n' });
+                req += b.createAlignmentElement({ position: 'right' });
+                req += b.createTextElement({ codepage: 'utf8', data: itRight + '\n' });
+            }
         });
 
         if (code) {
@@ -75,12 +87,10 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
             try { req += b.createBarcodeElement({ symbology: 'JAN13', width: 'width3', hri: 'true', height: 60, data: code }); } catch(e) {}
             req += b.createFeedElement({ line: 1 });
         }
-        req += b.createRuledLineElement({ thickness: 'medium', width: 576 });
-        req += b.createFeedElement({ line: 1 });
+        req += b.createRuledLineElement({ thickness: 'thin', width: 576 });
     });
 
     /* 合計 */
-    req += b.createFeedElement({ line: 1 });
     req += b.createAlignmentElement({ position: 'right' });
     req += b.createTextElement({ codepage: 'utf8', width: 2, height: 2, emphasis: 'true', data: '合計  \xa5' + grandTotal.toLocaleString() + '\n' });
     req += b.createTextElement({ width: 1, height: 1 });
@@ -88,21 +98,23 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     req += b.createAlignmentElement({ position: 'right' });
     req += b.createTextElement({ codepage: 'utf8', data: '(本体価格)\n' });
     if (typeof _starReceiptData !== 'undefined' && _starReceiptData && _starReceiptData.taxIncl) {
-        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '税込合計  \xa5' + _starReceiptData.taxIncl.toLocaleString() + '\n' });
+        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '税込合計  \xa5' + _starReceiptData.taxIncl.toLocaleString() + ' (' + _starReceiptData.taxLabel + ')\n' });
         req += b.createTextElement({ emphasis: 'false' });
-        req += b.createTextElement({ codepage: 'utf8', data: '(' + _starReceiptData.taxLabel + ')\n' });
     }
-    req += b.createFeedElement({ line: 2 });
+    /* お買上げ点数（全部門の数量の合計） */
+    var totalQty = 0;
+    catOrder.forEach(function(bumon) {
+        (groups[bumon] || []).forEach(function(it) { totalQty += (parseInt(it.qty, 10) || 0); });
+    });
+    req += b.createAlignmentElement({ position: 'right' });
+    req += b.createTextElement({ codepage: 'utf8', data: 'お買上げ点数  ' + totalQty + '点\n' });
+    req += b.createFeedElement({ line: 1 });
 
     /* フッター */
     req += b.createAlignmentElement({ position: 'center' });
     req += b.createTextElement({ codepage: 'utf8', data: 'ありがとうございました\n' });
-    req += b.createFeedElement({ line: 1 });
-    req += b.createTextElement({ codepage: 'utf8', data: '株式会社富惣\n' });
-    req += b.createTextElement({ codepage: 'utf8', data: '大阪府堺市堺区遠里小野町３丁４番１号\n' });
-    req += b.createTextElement({ codepage: 'utf8', data: 'TEL 072-229-8800 / FAX 072-229-4700\n' });
-    req += b.createTextElement({ codepage: 'utf8', data: 'お問合せ 0120-014-868\n' });
-    req += b.createFeedElement({ line: 4 });
+    /* カット前の余白。カット時の自動送り(feed:'true')があるので最小限にする。切れ目が文字にかかる場合はここを増やす */
+    req += b.createFeedElement({ line: RECEIPT_FEED_BEFORE_CUT });
     req += b.createCutPaperElement({ type: 'partial', feed: 'true' });
     return req;
 }

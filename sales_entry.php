@@ -1259,7 +1259,16 @@ elRegBtn.addEventListener('click', function() {
 });
 
 /** 売上を登録して結果を返す（失敗時は {ok:false,error}） */
+/* 通信が不安定な店舗向け：応答を待ち続けてボタンが戻らなくならないよう、一定時間で見切って
+ * 案内を出す。自動での再送はしない（サーバ側で処理中の登録と重ならないようにするため）。
+ * 同じ確定の再押しはトークンで二重登録にならない。 */
+const SUBMIT_TIMEOUT_MS = 30000;
 async function submitSale() {
+    if (navigator.onLine === false) {
+        return { ok: false, error: '通信できていません。電波の良い場所で、もう一度押してください。カートの内容は消えていません（二重登録にはなりません）。' };
+    }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
     try {
         const res = await fetch('sales_entry.php', {
             method: 'POST',
@@ -1267,11 +1276,18 @@ async function submitSale() {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({ cart_items: cart, submit_token: submitToken })
+            body: JSON.stringify({ cart_items: cart, submit_token: submitToken }),
+            signal: ctrl.signal
         });
         return await res.json();
     } catch (err) {
-        return { ok: false, error: '通信エラー: ' + err.message + '（もう一度押しても二重登録にはなりません）' };
+        const timedOut = err && err.name === 'AbortError';
+        return { ok: false, error: (timedOut
+            ? '通信に時間がかかっています。電波の状態を確認して、もう一度押してください。'
+            : '通信エラーです。電波の状態を確認して、もう一度押してください。')
+            + 'カートの内容は消えていません（二重登録にはなりません）。（' + (err && err.message ? err.message : '不明') + '）' };
+    } finally {
+        clearTimeout(timer);
     }
 }
 

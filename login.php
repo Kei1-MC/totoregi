@@ -16,47 +16,89 @@ if (isset($_SESSION['store_id'])) {
 
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/auth_lib.php';
 
 $error_message = '';
 $account  = trim($_POST['account']  ?? '');
 $password = trim($_POST['password'] ?? '');
 
+$MSG_BAD    = 'アカウント名またはパスワードが間違っています。';
+$MSG_LOCKED = 'ログインの失敗が続いたため、しばらくしてからやり直してください。';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account !== '' && $password !== '') {
 
-    // ---- 本社アカウント（固定）----
-    if ($account === '000' && $password === '000') {
-        session_regenerate_id(true);
-        $_SESSION['user']       = '000';
-        $_SESSION['store_id']   = '000';
-        $_SESSION['store_name'] = '本社';
-        $_SESSION['role']       = 'hq';
-        header('Location: hq_top.php');
-        exit();
-    }
+    $ip = auth_client_ip();
+
+    if (auth_is_locked($account, $ip)) {
+        $error_message = $MSG_LOCKED;
+
+    } elseif (!auth_valid_account($account)) {
+        auth_dummy_verify($password);
+        auth_record_failure($account, $ip);
+        $error_message = $MSG_BAD;
+
+    // ---- 本社アカウント（fm_config_secret.php の $hq_accounts。ハッシュで照合）----
+    } elseif (isset($hq_accounts) && is_array($hq_accounts) && isset($hq_accounts[$account])) {
+        $hq = $hq_accounts[$account];
+        if (password_verify($password, (string)($hq['hash'] ?? ''))) {
+            auth_clear_failures($account, $ip);
+            session_regenerate_id(true);
+            $_SESSION['user']       = $account;
+            $_SESSION['store_id']   = '000';
+            $_SESSION['store_name'] = (string)($hq['name'] ?? '本社');
+            $_SESSION['role']       = 'hq';
+            header('Location: hq_top.php');
+            exit();
+        }
+        auth_record_failure($account, $ip);
+        $error_message = $MSG_BAD;
 
     // ---- 店舗アカウント（account_API で照合）----
-    $fm = new fmRESTor($host, $db, $layout_account,
-                       $api_master_user, $api_master_pass, ['allowInsecure' => true]);
-    $result  = $fm->getRecords(['_limit' => 300]);
-    $records = $result['result']['response']['data'] ?? [];
+    } else {
+        $fm = new fmRESTor($host, $db, $layout_account,
+                           $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+        // 全店のアカウントを読み込まず、該当アカウントだけを完全一致で検索する
+        $result  = $fm->findRecords(['query' => [['account' => '==' . $account]], 'limit' => 2]);
+        $records = $result['result']['response']['data'] ?? [];
 
-    $matched = null;
-    foreach ($records as $rec) {
-        if ((string)($rec['fieldData']['account'] ?? '') === $account) {
-            $matched = $rec['fieldData'];
-            break;
+        $rec     = (count($records) === 1) ? $records[0] : null;   // 0件・重複は認証失敗
+        $matched = $rec['fieldData'] ?? null;
+        $ok      = false;
+        $migrate = false;
+
+        if ($matched !== null) {
+            $plain = (string)($matched['password']      ?? '');
+            $hash  = (string)($matched['password_hash'] ?? '');
+            if ($plain !== '') {
+                // 平文が入っている＝未移行、または本社がFileMakerで新しいパスワードを入力した状態
+                $ok      = hash_equals($plain, $password);
+                $migrate = $ok;
+            } elseif ($hash !== '') {
+                $ok = password_verify($password, $hash);
+                if ($ok && password_needs_rehash($hash, PASSWORD_DEFAULT)) $migrate = true;
+            } else {
+                auth_dummy_verify($password);   // パスワード未設定のアカウントはログイン不可
+            }
+        } else {
+            auth_dummy_verify($password);
         }
-    }
 
-    if ($matched !== null) {
-        $fm_password   = (string)($matched['password']   ?? '');
-        $eigyo_status  = trim((string)($matched['営業状態'] ?? ''));   // '営業中' or '閉店'
-
-        if ($password !== $fm_password) {
-            $error_message = 'アカウント名またはパスワードが間違っています。';
-        } elseif ($eigyo_status === '閉店') {
+        if (!$ok) {
+            auth_record_failure($account, $ip);
+            $error_message = $MSG_BAD;
+        } elseif (trim((string)($matched['営業状態'] ?? '')) === '閉店') {
             $error_message = 'この店舗は閉店済みのためログインできません。';
         } else {
+            // 平文 → ハッシュへ自動移行（account_API に password_hash フィールドがある場合のみ。
+            // 書き込みが失敗した場合は何も変わらず、平文のまま残る）
+            if ($migrate) {
+                $fm->editRecord($rec['recordId'], ['fieldData' => [
+                    'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                    'password'      => '',
+                ]]);
+            }
+            auth_clear_failures($account, $ip);
+            $eigyo_status = trim((string)($matched['営業状態'] ?? ''));   // '営業中' or '閉店'
             session_regenerate_id(true);
             $_SESSION['user']          = $account;
             $_SESSION['store_id']      = (string)($matched['店舗Ｎｏ'] ?? '');
@@ -67,8 +109,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account !== '' && $password !== ''
             header('Location: top.php');
             exit();
         }
-    } else {
-        $error_message = 'アカウント名またはパスワードが間違っています。';
     }
 }
 
@@ -156,6 +196,24 @@ include __DIR__ . '/header.php';
     transition: background .15s;
 }
 .login-btn:hover, .login-btn:active { background: #00695c; }
+
+/* 入力リセットボタン（ログインボタンより控えめに） */
+.login-reset {
+    display: block;
+    width: 100%;
+    padding: 0.6em;
+    margin-top: 0.8rem;
+    background: #fff;
+    color: #555;
+    border: 1px solid #bbb;
+    border-radius: 0.6rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+}
+.login-reset:active { background: #f0f0f0; }
+.login-help { margin-top: 1.2rem; font-size: 0.85rem; color: #555; }
+.login-help summary { cursor: pointer; color: #004d40; }
+.login-help p { margin: 0.6rem 0 0; line-height: 1.6; }
 </style>
 
 <div class="login-outer">
@@ -208,7 +266,44 @@ include __DIR__ . '/header.php';
 
             <button type="submit" class="login-btn">ログイン</button>
 
+            <!-- 他店舗の番号やパスワードを誤って入れたとき用：入力欄を空にしてやり直す -->
+            <button type="button" id="login-reset" class="login-reset">入力をリセット（やり直す）</button>
+
         </form>
+
+        <details class="login-help">
+            <summary>他店舗のパスワードが自動で入ってしまうとき</summary>
+            <p>
+                誤って入れたパスワードを、タブレットの「Google パスワード マネージャー」が
+                保存していることがあります。
+                上の「入力をリセット」で入力欄は空になりますが、保存された分は残ります。
+            </p>
+            <p>
+                <strong>保存分の消し方（Android）</strong><br>
+                1. タブレットの「設定」を開く<br>
+                2. 「Google」→「すべてのサービス」→「自動入力」→「Google パスワード マネージャー」を開く<br>
+                3. 一覧から、このサイト（kei1.me）の間違った保存分をタップする<br>
+                4. 「削除」をタップし、画面ロックなどで本人確認をする
+            </p>
+            <p>
+                ※メニューの名前は、機種やAndroidのバージョンで少し違います。
+                見つからないときや、操作がわからないときは、本社までご連絡ください。
+            </p>
+        </details>
+
+        <script>
+        (function () {
+            var btn = document.getElementById('login-reset');
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                var a = document.getElementById('account');
+                var p = document.getElementById('password');
+                a.value = '';
+                p.value = '';
+                a.focus();
+            });
+        })();
+        </script>
     </div>
 </div>
 

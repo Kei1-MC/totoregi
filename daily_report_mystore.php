@@ -87,13 +87,17 @@ foreach ($prev_data as $pf) {
 $month_total  = 0;
 $month_kyaku  = 0;
 $month_py_day = 0;   // 前年同日合計
+$month_py_kyaku = 0; // 前年同日の客数合計
 
 foreach ($this_data as $f) {
     $month_total  += (int)($f['合計売上'] ?? 0);
     $month_kyaku  += (int)($f['客数_閉店後'] ?? 0);
     $day_key = (int)date('j', _fm_to_ts($f['売上日'] ?? ''));
     $month_py_day += (int)(($prev_by_day[$day_key] ?? [])['合計売上'] ?? 0);
+    $month_py_kyaku += (int)(($prev_by_day[$day_key] ?? [])['客数_閉店後'] ?? 0);
 }
+$month_kyaku_ratio = ($month_py_kyaku > 0 && $month_kyaku > 0)
+    ? round($month_kyaku / $month_py_kyaku * 100, 1) : null;
 $month_sakutai = ($month_py_day > 0)
     ? round($month_total / $month_py_day * 100, 1) : null;
 
@@ -447,6 +451,10 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
     <div class="s-card">
       <div class="s-label">月計客数</div>
       <div class="s-value" style="color:#004d40;"><?= number_format($month_kyaku) ?><span style="font-size:.6em;"> 人</span></div>
+      <div style="font-size:.72em; color:#888; margin-top:.2em;">
+        前年 <?= $month_py_kyaku > 0 ? number_format($month_py_kyaku) . '人' : '―' ?>
+        <?php if ($month_kyaku_ratio !== null): ?>（<?= $month_kyaku_ratio ?>%）<?php endif; ?>
+      </div>
     </div>
     <div class="s-card">
       <div class="s-label">昨対（前年同日）</div>
@@ -479,6 +487,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         <th>曜</th>
         <th class="right">合計売上</th>
         <th class="right">客数</th>
+        <th class="right">前年客数</th>
         <th class="right">上代</th>
         <th class="right">上代達成率</th>
         <th class="right">前年</th>
@@ -492,6 +501,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
     $tbl_total_this   = 0;
     $tbl_total_prev   = 0;
     $tbl_total_kyaku  = 0;
+    $tbl_total_prev_kyaku = 0;
     $tbl_total_joudai = 0;
 
     for ($d = 1; $d <= $days_in_month; $d++):
@@ -517,6 +527,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
             ? ($prev_by_week[$week_k] ?? null)
             : ($prev_by_day[$day_j]   ?? null);
         $prev_uriage = $pf ? (int)($pf['合計売上'] ?? 0) : 0;
+        $prev_kyaku  = $pf ? (int)($pf['客数_閉店後'] ?? 0) : 0;
 
         // 昨対
         $sakutai_pct = ($prev_uriage > 0 && $this_uriage > 0)
@@ -527,6 +538,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         if ($f) {
             $tbl_total_this   += $this_uriage;
             $tbl_total_kyaku  += $this_kyaku;
+            $tbl_total_prev_kyaku += $prev_kyaku;
             $tbl_total_joudai += $this_joudai;
             if ($prev_uriage > 0) $tbl_total_prev += $prev_uriage;
         }
@@ -564,14 +576,18 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
       <?php elseif ($is_teikyu): ?>
-      <td class="right" colspan="6" style="text-align:center; color:#888;">🏠 定休日</td>
+      <td class="right" colspan="7" style="text-align:center; color:#888;">🏠 定休日</td>
       <?php else: ?>
       <td class="right">
         <?= $this_uriage > 0 ? '¥' . number_format($this_uriage) : '<span style="color:#ccc;">―</span>' ?>
       </td>
       <td class="right">
         <?= $this_kyaku > 0 ? number_format($this_kyaku) : '<span style="color:#ccc;">―</span>' ?>
+      </td>
+      <td class="right" style="color:#999; font-size:.9em;">
+        <?= $prev_kyaku > 0 ? number_format($prev_kyaku) : '<span style="color:#ddd;">―</span>' ?>
       </td>
       <td class="right" style="color:#999; font-size:.9em;">
         <?= $this_joudai > 0 ? '¥' . number_format($this_joudai) : '<span style="color:#ddd;">―</span>' ?>
@@ -617,6 +633,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td class="right" style="color:#999; font-size:.9em;"></td>
       <td class="right" style="color:#999; font-size:.9em;"></td>
       <td class="right" style="color:#999; font-size:.9em;"></td>
+      <td class="right" style="color:#999; font-size:.9em;"></td>
       <td class="right" style="color:#999; font-size:.9em;"><?= $dpy > 0 ? '¥' . number_format($dpy) : '<span style="color:#ddd;">―</span>' ?></td>
       <td class="right <?= $dr_cls ?>"><?= $dr !== null ? $dr . '%' : '<span style="color:#ddd;">―</span>' ?></td>
       <td></td>
@@ -642,6 +659,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td colspan="2">月　計</td>
       <td class="right">¥<?= number_format($tbl_total_this) ?></td>
       <td class="right"><?= number_format($tbl_total_kyaku) ?></td>
+      <td class="right" style="font-size:.9em;"><?= $tbl_total_prev_kyaku > 0 ? number_format($tbl_total_prev_kyaku) : '―' ?></td>
       <td class="right" style="font-size:.9em;">¥<?= number_format($tbl_total_joudai) ?></td>
       <td class="right <?= $total_joudai_ritsu === null ? '' : ($total_joudai_ritsu >= 100 ? 'up' : 'down') ?>">
         <?= $total_joudai_ritsu !== null ? $total_joudai_ritsu . '%' : '―' ?>

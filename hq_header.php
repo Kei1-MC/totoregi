@@ -67,10 +67,22 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'hq') {
                     <a class="nav-link py-1" href="hq_tanpin.php">🔍 単品管理</a>
                 </li>
                 <li class="nav-item border-top border-secondary mt-1 pt-1">
+                    <span class="nav-link py-1 text-white-50" style="font-size:.8em; cursor:default;">── 発注 ──</span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="hq_order_list.php">📦 発注一覧</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="hq_order_items.php">🗒 発注可能商品</a>
+                </li>
+                <li class="nav-item border-top border-secondary mt-1 pt-1">
                     <span class="nav-link py-1 text-white-50" style="font-size:.8em; cursor:default;">── マスター管理 ──</span>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link py-1" href="hq_shohin_maint.php">📦 商品メンテ</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="photo_manage.php">📷 商品写真登録</a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link py-1" href="hq_tenpo_maint.php">🏪 店舗マスター</a>

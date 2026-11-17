@@ -72,8 +72,15 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
     if (!$is_hq && !in_array($store_id, getStorePositions($f), true)) continue;
     $pid  = (string)$row['recordId'];
     $meta = photo_meta($pid);
+    // 登録単価（本体価格・税抜）。店舗は自店の店舗本体価格があればそれを優先
+    $price = (int)($f['本体価格'] ?? 0);
+    if (!$is_hq) {
+        $pos = array_search($store_id, getStorePositions($f), true);
+        $sp  = $pos === false ? 0 : (int)($f[repeatKey('店舗本体価格', $pos)] ?? 0);
+        if ($sp > 0) $price = $sp;
+    }
     $items[] = [
-        'pid' => $pid, 'name' => $n,
+        'pid' => $pid, 'name' => $n, 'price' => $price,
         'bumon' => trim((string)($f['部門'] ?? '')) ?: 'その他',
         'adopted' => $meta['adopted'], 'cands' => $meta['cands'],
     ];
@@ -93,7 +100,7 @@ include __DIR__ . ($is_hq ? '/hq_header.php' : '/header.php');
 .ph-filter{display:flex;flex-wrap:wrap;gap:.4em;margin:.8em 0}
 .ph-filter select,.ph-filter input{padding:.35em .5em;border:1px solid #ccc;border-radius:.4em}
 .ph-item{border:1px solid #e0e0e0;border-radius:.6em;padding:.6em;margin:.6em 0;background:#fff}
-.ph-item .nm{font-weight:bold}.ph-item .bm{font-size:.75em;color:#004d40;margin-left:.5em}
+.ph-item .pr{float:right;font-size:.85em;color:#333}.ph-item .nm{font-weight:bold}.ph-item .bm{font-size:.75em;color:#004d40;margin-left:.5em}
 .ph-row{display:flex;flex-wrap:wrap;gap:.5em;margin-top:.5em}
 .ph-c{width:110px;font-size:.72em;text-align:center}
 .ph-c img{width:110px;height:82px;object-fit:cover;border-radius:.4em;border:2px solid #ddd;display:block}
@@ -127,7 +134,7 @@ include __DIR__ . ($is_hq ? '/hq_header.php' : '/header.php');
   <?php foreach ($items as $it):
       $state = !$it['cands'] ? 'none' : ($it['adopted'] ? 'done' : 'wait'); ?>
     <div class="ph-item" data-pid="<?= $h($it['pid']) ?>" data-bumon="<?= $h($it['bumon']) ?>" data-state="<?= $state ?>" data-name="<?= $h($it['name']) ?>">
-      <div><span class="nm"><?= $h($it['name']) ?></span><span class="bm"><?= $h($it['bumon']) ?></span></div>
+      <div><span class="nm"><?= $h($it['name']) ?></span><span class="bm"><?= $h($it['bumon']) ?></span><span class="pr"><?= $it['price'] > 0 ? '登録単価 ¥' . number_format($it['price']) . '（税抜）' : '登録単価 未設定' ?></span></div>
       <div class="ph-row">
         <?php if (!$it['cands']): ?><div class="ph-none">写真なし</div><?php endif; ?>
         <?php foreach ($it['cands'] as $c):
