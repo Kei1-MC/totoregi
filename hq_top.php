@@ -115,12 +115,29 @@ include __DIR__ . '/hq_header.php';
     </a>
   </div>
 
+  <!-- 発注 -->
+  <div class="section-label" style="margin-top:1.4em;">発注（店舗→本社・工場）</div>
+  <div class="nav-buttons">
+    <a href="hq_order_list.php" class="nav-btn primary">
+      <span class="nav-icon">📦</span>
+      発注一覧
+    </a>
+    <a href="hq_order_items.php" class="nav-btn">
+      <span class="nav-icon">🗒</span>
+      発注可能商品
+    </a>
+  </div>
+
   <!-- マスター管理 -->
   <div class="section-label" style="margin-top:1.4em;">マスター管理</div>
   <div class="nav-buttons">
     <a href="hq_shohin_maint.php" class="nav-btn">
       <span class="nav-icon">📦</span>
       商品メンテ
+    </a>
+    <a href="photo_manage.php" class="nav-btn">
+      <span class="nav-icon">📷</span>
+      商品写真登録
     </a>
     <a href="hq_tenpo_maint.php" class="nav-btn">
       <span class="nav-icon">🏪</span>

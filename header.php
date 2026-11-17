@@ -60,10 +60,16 @@ $accountName = $_SESSION['store_name'] ?? $_SESSION['user'] ?? "未ログイン"
                     <a class="nav-link py-1" href="daily_report_entry.php">📊 売上日報入力</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link py-1" href="order_entry.php">📦 発注入力</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link py-1" href="daily_report_mystore.php">📈 自店舗成績</a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link py-1" href="shohin_maint.php">📦 商品メンテ</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="photo_manage.php">📷 商品写真登録</a>
                 </li>
                 <li class="nav-item border-top border-secondary mt-1 pt-1">
                     <a class="nav-link py-1 text-warning" href="logout.php">🚪 ログアウト</a>

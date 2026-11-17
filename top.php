@@ -293,6 +293,10 @@ include __DIR__ . '/header.php';
       <span class="nav-icon">🗑</span>
       廃棄数入力
     </a>
+    <a href="order_entry.php" class="nav-btn">
+      <span class="nav-icon">📦</span>
+      発注入力
+    </a>
     <a href="daily_report_mystore.php" class="nav-btn">
       <span class="nav-icon">📈</span>
       自店舗成績
@@ -300,6 +304,10 @@ include __DIR__ . '/header.php';
     <a href="shohin_maint.php" class="nav-btn">
       <span class="nav-icon">📦</span>
       商品メンテ
+    </a>
+    <a href="photo_manage.php" class="nav-btn">
+      <span class="nav-icon">📷</span>
+      商品写真登録
     </a>
   </div>
 
